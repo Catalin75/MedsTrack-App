@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ro" class="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>MedsTrack - Management & Reminder Medicamente</title>
+  <meta name="description" content="Aplicație modernă pentru gestionarea tratamentului medicamentos și notificări orare.">
+  <meta name="theme-color" content="#0058bc">
+  <link rel="manifest" href="./manifest.json">
+  <link rel="apple-touch-icon" href="./icon-192.png">
+
+  <!-- Google Fonts & Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "primary": "#0058bc",
+            "primary-container": "#0070eb",
+            "on-primary": "#ffffff",
+            "on-primary-container": "#fefcff",
+            "primary-fixed": "#d8e2ff",
+            "primary-fixed-dim": "#adc6ff",
+            "background": "#f9f9ff",
+            "on-background": "#181c23",
+            "surface": "#f9f9ff",
+            "on-surface": "#181c23",
+            "surface-dim": "#d8d9e5",
+            "surface-bright": "#f9f9ff",
+            "surface-container-lowest": "#ffffff",
+            "surface-container-low": "#f1f3fe",
+            "surface-container": "#ecedf9",
+            "surface-container-high": "#e6e8f3",
+            "surface-container-highest": "#e0e2ed",
+            "surface-variant": "#e0e2ed",
+            "on-surface-variant": "#414755",
+            "outline": "#717786",
+            "outline-variant": "#c1c6d7",
+            "secondary": "#006972",
+            "secondary-container": "#73eefd",
+            "on-secondary": "#ffffff",
+            "on-secondary-container": "#006b75",
+            "secondary-fixed": "#8cf2ff",
+            "tertiary": "#9e3d00",
+            "tertiary-container": "#c64f00",
+            "tertiary-fixed": "#ffdbcc",
+            "on-tertiary": "#ffffff",
+            "on-tertiary-container": "#fffbff",
+            "error": "#ba1a1a",
+            "error-container": "#ffdad6",
+            "on-error": "#ffffff",
+            "on-error-container": "#93000a",
+            "inverse-surface": "#2d3039",
+            "inverse-on-surface": "#eef0fc",
+            "inverse-primary": "#adc6ff"
+          },
+          borderRadius: {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "2xl": "1rem",
+            "3xl": "1.5rem",
+            "full": "9999px"
+          },
+          spacing: {
+            "unit": "4px",
+            "stack-sm": "8px",
+            "stack-md": "16px",
+            "stack-lg": "24px",
+            "container-margin": "20px",
+            "gutter": "16px",
+            "touch-target-min": "48px"
+          },
+          fontFamily: {
+            sans: ["Inter", "sans-serif"]
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #f9f9ff;
+      color: #181c23;
+      -webkit-font-smoothing: antialiased;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      display: inline-block;
+      vertical-align: middle;
+    }
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    .glass-card {
+      background: rgba(255, 255, 255, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+    .recording-pulse {
+      animation: pulse-ring 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    @keyframes pulse-ring {
+      0% { transform: scale(1); opacity: 0.5; }
+      50% { transform: scale(1.15); opacity: 0.2; }
+      100% { transform: scale(1); opacity: 0.5; }
+    }
+    .waveform-bar {
+      transition: height 0.1s ease-in-out;
+    }
+  </style>
+</head>
+<body class="bg-background text-on-background min-h-screen flex flex-col justify-between selection:bg-primary-fixed">
+
+  <!-- Main View Container -->
+  <div id="app" class="flex-1 flex flex-col min-h-screen pb-24">
+    <!-- Dynamic View Content Injected Here -->
+  </div>
+
+  <!-- Bottom Navigation Bar (Persistent) -->
+  <nav id="bottom-nav" class="fixed bottom-0 left-0 right-0 w-full flex justify-around items-center px-4 py-2 bg-surface shadow-[0_-4px_12px_0_rgba(0,0,0,0.06)] z-40 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+    <button data-nav="dashboard" class="nav-item flex flex-col items-center justify-center text-on-surface-variant p-2 rounded-xl transition-all active:scale-90">
+      <span class="material-symbols-outlined">home</span>
+      <span class="text-xs font-medium mt-1">Acasă</span>
+    </button>
+    <button data-nav="cabinet" class="nav-item flex flex-col items-center justify-center text-on-surface-variant p-2 rounded-xl transition-all active:scale-90">
+      <span class="material-symbols-outlined">pill</span>
+      <span class="text-xs font-medium mt-1">Cabinet</span>
+    </button>
+    <button data-nav="history" class="nav-item flex flex-col items-center justify-center text-on-surface-variant p-2 rounded-xl transition-all active:scale-90">
+      <span class="material-symbols-outlined">insights</span>
+      <span class="text-xs font-medium mt-1">Istoric</span>
+    </button>
+    <button data-nav="notifications" class="nav-item flex flex-col items-center justify-center text-on-surface-variant p-2 rounded-xl transition-all active:scale-90">
+      <span class="material-symbols-outlined">notifications</span>
+      <span class="text-xs font-medium mt-1">Alerte</span>
+    </button>
+  </nav>
+
+  <!-- Notification Toast Container -->
+  <div id="toast-container" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 w-full max-w-sm px-4 pointer-events-none space-y-2"></div>
+
+  <!-- JS Module Entry Point -->
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
