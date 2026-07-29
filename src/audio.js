@@ -1,0 +1,184 @@
+// Web Audio & Microphone Recording Module for MedsTrack
+let audioCtx = null;
+let mediaRecorder = null;
+let audioChunks = [];
+let recordingStartTime = 0;
+let animationFrameId = null;
+
+function getAudioContext() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+  return audioCtx;
+}
+
+// Synthesize notification tones using Web Audio API
+export function playNotificationSound(soundName = 'bell', volumePercent = 75) {
+  try {
+    const ctx = getAudioContext();
+    const gainNode = ctx.createGain();
+    const volume = (volumePercent / 100) * 0.3; // safe max volume
+    gainNode.gain.setValueAtTime(volume, ctx.currentTime);
+    gainNode.connect(ctx.destination);
+
+    const now = ctx.currentTime;
+
+    if (soundName === 'bell') {
+      // Crystal Bell Chime (C5 -> E5 -> G5)
+      const notes = [523.25, 659.25, 783.99];
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const noteGain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + i * 0.15);
+        noteGain.gain.setValueAtTime(volume, now + i * 0.15);
+        noteGain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.15 + 1.2);
+        osc.connect(noteGain);
+        noteGain.connect(ctx.destination);
+        osc.start(now + i * 0.15);
+        osc.stop(now + i * 0.15 + 1.2);
+      });
+    } else if (soundName === 'vital') {
+      // Pulse Vital (Double Beep)
+      [0, 0.15].forEach(t => {
+        const osc = ctx.createOscillator();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(587.33, now + t);
+        osc.connect(gainNode);
+        osc.start(now + t);
+        osc.stop(now + t + 0.08);
+      });
+    } else if (soundName === 'alert') {
+      // Urgent Medical Alert
+      [0, 0.12, 0.24, 0.36].forEach((t, i) => {
+        const osc = ctx.createOscillator();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(i % 2 === 0 ? 880 : 1100, now + t);
+        osc.connect(gainNode);
+        osc.start(now + t);
+        osc.stop(now + t + 0.09);
+      });
+    } else if (soundName === 'zen') {
+      // Relaxing Zen Bowl
+      const osc = ctx.createOscillator();
+      const noteGain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(220, now); // A3
+      noteGain.gain.setValueAtTime(volume * 1.5, now);
+      noteGain.gain.exponentialRampToValueAtTime(0.0001, now + 2.5);
+      osc.connect(noteGain);
+      noteGain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 2.5);
+    } else if (soundName === 'echo') {
+      // Digital Echo
+      [0, 0.1, 0.2].forEach((t, i) => {
+        const osc = ctx.createOscillator();
+        const noteGain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(1046.50 / (i + 1), now + t);
+        noteGain.gain.setValueAtTime(volume / (i + 1), now + t);
+        noteGain.gain.exponentialRampToValueAtTime(0.001, now + t + 0.3);
+        osc.connect(noteGain);
+        noteGain.connect(ctx.destination);
+        osc.start(now + t);
+        osc.stop(now + t + 0.3);
+      });
+    }
+  } catch (err) {
+    console.warn('Audio synthesis warning:', err);
+  }
+}
+
+// MediaRecorder Voice Memo API
+export async function startRecording(onVolumeUpdate) {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    throw new Error('Microfonul nu este suportat în acest browser.');
+  }
+
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const ctx = getAudioContext();
+  const source = ctx.createMediaStreamSource(stream);
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 64;
+  source.connect(analyser);
+
+  audioChunks = [];
+  mediaRecorder = new MediaRecorder(stream);
+
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data.size > 0) {
+      audioChunks.push(e.data);
+    }
+  };
+
+  recordingStartTime = Date.now();
+  mediaRecorder.start(100);
+
+  // Live Waveform Visualizer Feedback
+  const dataArray = new Uint8Array(analyser.frequencyBinCount);
+  function updateWaveform() {
+    analyser.getByteFrequencyData(dataArray);
+    let sum = 0;
+    for (let i = 0; i < dataArray.length; i++) {
+      sum += dataArray[i];
+    }
+    const avg = sum / dataArray.length;
+    if (onVolumeUpdate) {
+      onVolumeUpdate(avg, dataArray);
+    }
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+      animationFrameId = requestAnimationFrame(updateWaveform);
+    }
+  }
+  updateWaveform();
+
+  return stream;
+}
+
+export function stopRecording() {
+  return new Promise((resolve) => {
+    if (!mediaRecorder || mediaRecorder.state !== 'recording') {
+      resolve(null);
+      return;
+    }
+
+    if (animationFrameId) {
+      cancelAnimationFrame(animationFrameId);
+    }
+
+    mediaRecorder.onstop = () => {
+      const durationSeconds = Math.round((Date.now() - recordingStartTime) / 1000);
+      const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+      
+      // Stop stream tracks
+      if (mediaRecorder.stream) {
+        mediaRecorder.stream.getTracks().forEach(track => track.stop());
+      }
+
+      mediaRecorder = null;
+      resolve({ blob: audioBlob, durationSeconds });
+    };
+
+    mediaRecorder.stop();
+  });
+}
+
+export function playAudioBlob(blob) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.onended = () => {
+      URL.revokeObjectURL(url);
+      resolve();
+    };
+    audio.onerror = (e) => {
+      URL.revokeObjectURL(url);
+      reject(e);
+    };
+    audio.play();
+  });
+}
