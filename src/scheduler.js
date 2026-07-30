@@ -1,6 +1,7 @@
 // Real-time Dose Scheduler & Background Notification Service for MedsTrack
 import { getMedications, getLogsForDate, getTodayString, recordDoseStatus } from './db.js';
 import { playNotificationSound } from './audio.js';
+import { LocalNotifications } from '@capacitor/local-notifications';
 
 let schedulerInterval = null;
 const notifiedDosesSet = new Set(); // Tracks format: `${medId}_${dateStr}_${timeStr}`
@@ -16,12 +17,65 @@ export function initDoseScheduler() {
     });
   }
 
+  // Schedule native mobile OS local notifications via Capacitor
+  scheduleNativeLocalNotifications();
+
   if (schedulerInterval) {
     clearInterval(schedulerInterval);
   }
 
   checkScheduledDoses();
   schedulerInterval = setInterval(checkScheduledDoses, 10000);
+}
+
+/**
+ * Schedules exact OS-level background notifications on mobile devices via Capacitor.
+ */
+export async function scheduleNativeLocalNotifications() {
+  try {
+    const isCapacitor = window.Capacitor && window.Capacitor.isNativePlatform();
+    if (!isCapacitor) return;
+
+    const perm = await LocalNotifications.requestPermissions();
+    if (perm.display !== 'granted') return;
+
+    const medications = await getMedications();
+    const notificationsToSchedule = [];
+    let idCounter = 1000;
+
+    for (const med of medications) {
+      if (!med.times || !Array.isArray(med.times)) continue;
+      
+      const categoryPart = med.treatmentCategory ? `[${med.treatmentCategory}] ` : '';
+      const title = `💊 ${categoryPart}${med.name}`;
+
+      for (const timeStr of med.times) {
+        const [hours, minutes] = timeStr.split(':').map(Number);
+        
+        const scheduleDate = new Date();
+        scheduleDate.setHours(hours, minutes, 0, 0);
+        if (scheduleDate.getTime() <= Date.now()) {
+          scheduleDate.setDate(scheduleDate.getDate() + 1);
+        }
+
+        notificationsToSchedule.push({
+          title,
+          body: `⏰ Ora ${timeStr} • Doză: ${med.dosageDisplay || '1 comprimat'} • Forma: ${med.formLabel || 'Comprimat'}`,
+          id: idCounter++,
+          schedule: { at: scheduleDate, repeats: true, every: 'day' },
+          sound: null,
+          actionTypeId: 'MED_ALARM',
+          extra: { medId: med.id, timeStr }
+        });
+      }
+    }
+
+    if (notificationsToSchedule.length > 0) {
+      await LocalNotifications.schedule({ notifications: notificationsToSchedule }).catch(() => {});
+    }
+  } catch (err) {
+    console.log('LocalNotifications init note:', err);
+  }
 }
 
 /**
