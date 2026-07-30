@@ -11,6 +11,8 @@ let formData = {
   dosageValue: '1',
   dosageUnit: 'unitati',
   durationDays: 7,
+  isCustomDuration: false,
+  customDays: 65,
   dosesPerDay: 2,
   times: ['08:00', '20:00'],
   mealReminder: true,
@@ -31,6 +33,8 @@ export async function renderAddMedication(container, navigateTo, editId = null) 
     const existing = await getMedication(editId);
     if (existing) {
       const isUnlim = existing.isUnlimited || existing.totalStock === 'unlimited';
+      const dur = existing.durationDays || 7;
+      const isCustom = dur !== 7 && dur !== 30;
       formData = {
         id: existing.id,
         treatmentCategory: existing.treatmentCategory || '',
@@ -38,7 +42,9 @@ export async function renderAddMedication(container, navigateTo, editId = null) 
         form: existing.form || 'capsule',
         dosageValue: existing.dosageValue || '1',
         dosageUnit: existing.dosageUnit || 'unitati',
-        durationDays: existing.durationDays || 7,
+        durationDays: dur,
+        isCustomDuration: isCustom,
+        customDays: isCustom ? dur : 65,
         dosesPerDay: existing.dosesPerDay || (existing.times ? existing.times.length : 2),
         times: existing.times || ['08:00', '20:00'],
         mealReminder: existing.mealReminder !== undefined ? existing.mealReminder : true,
@@ -61,6 +67,8 @@ export async function renderAddMedication(container, navigateTo, editId = null) 
       dosageValue: '1',
       dosageUnit: 'unitati',
       durationDays: 7,
+      isCustomDuration: false,
+      customDays: 65,
       dosesPerDay: 2,
       times: ['08:00', '20:00'],
       mealReminder: true,
@@ -208,24 +216,45 @@ function renderStep1() {
 }
 
 function renderStep2() {
+  const isCustom = formData.isCustomDuration || (formData.durationDays !== 7 && formData.durationDays !== 30);
+  const customDaysVal = formData.isCustomDuration 
+    ? formData.durationDays 
+    : (formData.durationDays !== 7 && formData.durationDays !== 30 ? formData.durationDays : (formData.customDays || 65));
+
   return `
     <div class="space-y-5">
       <!-- Duration Section -->
       <div class="bg-surface-container-lowest p-4 rounded-2xl border border-outline-variant/40 shadow-sm space-y-3">
         <label class="text-xs font-bold text-primary uppercase tracking-wider block">Durata tratamentului</label>
         <div class="grid grid-cols-3 gap-2">
-          <button type="button" data-duration="7" class="btn-duration flex flex-col items-center justify-center p-3 border-2 ${formData.durationDays === 7 ? 'border-primary bg-primary-fixed/20 text-primary' : 'border-outline-variant text-on-surface'} rounded-2xl active:scale-95 transition-all">
+          <button type="button" data-duration="7" class="btn-duration flex flex-col items-center justify-center p-3 border-2 ${!isCustom && formData.durationDays === 7 ? 'border-primary bg-primary-fixed/20 text-primary' : 'border-outline-variant text-on-surface'} rounded-2xl active:scale-95 transition-all">
             <span class="text-lg font-bold">7</span>
             <span class="text-xs">Zile</span>
           </button>
-          <button type="button" data-duration="30" class="btn-duration flex flex-col items-center justify-center p-3 border-2 ${formData.durationDays === 30 ? 'border-primary bg-primary-fixed/20 text-primary' : 'border-outline-variant text-on-surface'} rounded-2xl active:scale-95 transition-all">
+          <button type="button" data-duration="30" class="btn-duration flex flex-col items-center justify-center p-3 border-2 ${!isCustom && formData.durationDays === 30 ? 'border-primary bg-primary-fixed/20 text-primary' : 'border-outline-variant text-on-surface'} rounded-2xl active:scale-95 transition-all">
             <span class="text-lg font-bold">1</span>
             <span class="text-xs">Lună</span>
           </button>
-          <button type="button" data-duration="365" class="btn-duration flex flex-col items-center justify-center p-3 border-2 ${formData.durationDays === 365 ? 'border-primary bg-primary-fixed/20 text-primary' : 'border-outline-variant text-on-surface'} rounded-2xl active:scale-95 transition-all">
-            <span class="material-symbols-outlined">all_inclusive</span>
-            <span class="text-xs">Permanent</span>
+          <button type="button" data-duration="custom" class="btn-duration flex flex-col items-center justify-center p-3 border-2 ${isCustom ? 'border-primary bg-primary-fixed/20 text-primary' : 'border-outline-variant text-on-surface'} rounded-2xl active:scale-95 transition-all">
+            <span class="material-symbols-outlined text-xl">edit_calendar</span>
+            <span class="text-xs font-bold">Personalizat</span>
           </button>
+        </div>
+
+        <!-- Custom Duration Input Section -->
+        <div id="custom-duration-wrapper" class="${isCustom ? 'block' : 'hidden'} pt-2">
+          <div class="p-3.5 bg-surface-container-low rounded-xl border border-outline-variant/40 space-y-2">
+            <label for="input_custom_days" class="text-xs font-bold text-on-surface flex items-center gap-1.5">
+              <span class="material-symbols-outlined text-primary text-base">calendar_today</span>
+              <span>Introduceți numărul de zile dorit:</span>
+            </label>
+            <div class="flex items-center gap-2">
+              <input id="input_custom_days" type="number" min="1" max="1000" value="${customDaysVal}" placeholder="Ex: 65"
+                class="w-full h-11 px-3.5 bg-surface-container-lowest border border-outline-variant rounded-xl text-base font-bold text-primary focus:border-primary outline-none" />
+              <span class="text-xs font-bold text-on-surface-variant pr-2">Zile</span>
+            </div>
+            <p class="text-[11px] text-on-surface-variant">Tratamentul va fi programat pentru <strong id="disp-custom-days" class="text-primary font-bold">${customDaysVal}</strong> zile.</p>
+          </div>
         </div>
       </div>
 
@@ -404,6 +433,19 @@ function attachStepEvents(container, navigateTo) {
         currentStep = 2;
         renderWizardStep(container, navigateTo);
       } else if (currentStep === 2) {
+        if (formData.isCustomDuration) {
+          const customDaysInput = container.querySelector('#input_custom_days');
+          if (customDaysInput) {
+            const parsedVal = parseInt(customDaysInput.value, 10);
+            if (!isNaN(parsedVal) && parsedVal > 0) {
+              formData.durationDays = parsedVal;
+              formData.customDays = parsedVal;
+            } else {
+              alert('Te rugăm să introduci un număr valid de zile pentru perioada personalizată!');
+              return;
+            }
+          }
+        }
         currentStep = 3;
         renderWizardStep(container, navigateTo);
       } else if (currentStep === 3) {
@@ -494,12 +536,38 @@ function attachStepEvents(container, navigateTo) {
 
   // Step 2 Listeners
   if (currentStep === 2) {
+    const customDaysInput = container.querySelector('#input_custom_days');
+    const dispCustomDays = container.querySelector('#disp-custom-days');
+
     container.querySelectorAll('.btn-duration').forEach(btn => {
       btn.addEventListener('click', () => {
-        formData.durationDays = Number(btn.getAttribute('data-duration'));
+        const durAttr = btn.getAttribute('data-duration');
+        if (durAttr === 'custom') {
+          formData.isCustomDuration = true;
+          const currentTyped = customDaysInput ? parseInt(customDaysInput.value, 10) : 65;
+          const validVal = !isNaN(currentTyped) && currentTyped > 0 ? currentTyped : 65;
+          formData.durationDays = validVal;
+          formData.customDays = validVal;
+        } else {
+          formData.isCustomDuration = false;
+          formData.durationDays = Number(durAttr);
+        }
         renderWizardStep(container, navigateTo);
       });
     });
+
+    if (customDaysInput) {
+      customDaysInput.addEventListener('input', (e) => {
+        const val = parseInt(e.target.value, 10);
+        if (!isNaN(val) && val > 0) {
+          formData.durationDays = val;
+          formData.customDays = val;
+          if (dispCustomDays) {
+            dispCustomDays.innerText = val;
+          }
+        }
+      });
+    }
 
     const btnInc = container.querySelector('#btn-inc-doses');
     const btnDec = container.querySelector('#btn-dec-doses');
