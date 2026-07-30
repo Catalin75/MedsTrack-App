@@ -1,8 +1,9 @@
-import { getSettings, saveSettings } from '../db.js';
+import { getSettings, saveSettings, getVoiceMemos } from '../db.js';
 import { playNotificationSound } from '../audio.js';
 
 export async function renderNotifications(container, navigateTo) {
   const settings = await getSettings();
+  const voiceMemos = await getVoiceMemos();
 
   container.innerHTML = `
     <!-- Top App Bar -->
@@ -73,29 +74,70 @@ export async function renderNotifications(container, navigateTo) {
       </section>
 
       <!-- Sound Selection List -->
-      <section class="space-y-2">
-        <h2 class="text-xs font-bold uppercase tracking-wider text-outline px-1">Sunet Notificare Implicit</h2>
+      <section class="space-y-4">
         <div class="space-y-2">
-          ${[
-            { id: 'bell', title: 'Clopoțel (Default)', desc: 'Clar, blând și cristalin' },
-            { id: 'vital', title: 'Puls Vital', desc: 'Bip ritmic și constant' },
-            { id: 'alert', title: 'Alertă Medicală', desc: 'Ton urgent și persistent' },
-            { id: 'zen', title: 'Zen Bowl', desc: 'Melodie calmantă și relaxantă' },
-            { id: 'echo', title: 'Digital Echo', desc: 'Sunet sintetic modern' }
-          ].map(s => `
-            <label class="flex items-center justify-between bg-surface-container-lowest p-3.5 rounded-2xl border-2 ${settings.soundChoice === s.id ? 'border-primary bg-primary-fixed/10' : 'border-outline-variant/30'} cursor-pointer hover:border-primary/50 transition-all">
-              <div class="flex items-center gap-3">
-                <button type="button" data-sound="${s.id}" class="btn-play-sound-item w-9 h-9 flex items-center justify-center bg-primary-fixed rounded-full text-primary hover:scale-105 active:scale-95 transition-all">
-                  <span class="material-symbols-outlined text-xl">play_arrow</span>
-                </button>
-                <div>
-                  <p class="text-sm font-bold text-on-surface">${s.title}</p>
-                  <p class="text-xs text-on-surface-variant">${s.desc}</p>
+          <h2 class="text-xs font-bold uppercase tracking-wider text-outline px-1">Sunet Notificare Implicit</h2>
+          <div class="space-y-2">
+            ${[
+              { id: 'bell', title: 'Clopoțel (Default)', desc: 'Clar, blând și cristalin' },
+              { id: 'vital', title: 'Puls Vital', desc: 'Bip ritmic și constant' },
+              { id: 'alert', title: 'Alertă Medicală', desc: 'Ton urgent și persistent' },
+              { id: 'zen', title: 'Zen Bowl', desc: 'Melodie calmantă și relaxantă' },
+              { id: 'echo', title: 'Digital Echo', desc: 'Sunet sintetic modern' }
+            ].map(s => `
+              <label class="flex items-center justify-between bg-surface-container-lowest p-3.5 rounded-2xl border-2 ${settings.soundChoice === s.id ? 'border-primary bg-primary-fixed/10' : 'border-outline-variant/30'} cursor-pointer hover:border-primary/50 transition-all">
+                <div class="flex items-center gap-3">
+                  <button type="button" data-sound="${s.id}" class="btn-play-sound-item w-9 h-9 flex items-center justify-center bg-primary-fixed rounded-full text-primary hover:scale-105 active:scale-95 transition-all">
+                    <span class="material-symbols-outlined text-xl">play_arrow</span>
+                  </button>
+                  <div>
+                    <p class="text-sm font-bold text-on-surface">${s.title}</p>
+                    <p class="text-xs text-on-surface-variant">${s.desc}</p>
+                  </div>
                 </div>
-              </div>
-              <input type="radio" name="global_sound" value="${s.id}" ${settings.soundChoice === s.id ? 'checked' : ''} class="w-5 h-5 text-primary" />
-            </label>
-          `).join('')}
+                <input type="radio" name="global_sound" value="${s.id}" ${settings.soundChoice === s.id ? 'checked' : ''} class="w-5 h-5 text-primary" />
+              </label>
+            `).join('')}
+          </div>
+        </div>
+
+        <!-- Recorded Voice Memos Options Section -->
+        <div class="space-y-2 pt-2">
+          <div class="flex items-center justify-between px-1">
+            <h2 class="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+              <span class="material-symbols-outlined text-sm text-tertiary">mic</span>
+              <span>Mementouri Vocale Înregistrate (${voiceMemos.length})</span>
+            </h2>
+          </div>
+
+          ${voiceMemos.length === 0 ? `
+            <div class="p-3.5 bg-surface-container-lowest rounded-2xl border border-outline-variant/30 text-center space-y-1">
+              <p class="text-xs font-bold text-on-surface">Nu aveți mementouri vocale înregistrate încă.</p>
+              <p class="text-[11px] text-on-surface-variant">Puteți înregistra mesaje vocale la adăugarea sau editarea unui tratament.</p>
+            </div>
+          ` : `
+            <div class="space-y-2">
+              ${voiceMemos.map(vm => {
+                const valKey = `voice_${vm.id}`;
+                const isSelected = settings.soundChoice === valKey;
+                const dateStr = vm.createdAt ? new Date(vm.createdAt).toLocaleDateString('ro-RO') : 'Înregistrat';
+                return `
+                  <label class="flex items-center justify-between bg-surface-container-lowest p-3.5 rounded-2xl border-2 ${isSelected ? 'border-primary bg-primary-fixed/10' : 'border-outline-variant/30'} cursor-pointer hover:border-primary/50 transition-all">
+                    <div class="flex items-center gap-3">
+                      <button type="button" data-sound="${valKey}" class="btn-play-sound-item w-9 h-9 flex items-center justify-center bg-tertiary-fixed rounded-full text-tertiary hover:scale-105 active:scale-95 transition-all">
+                        <span class="material-symbols-outlined text-xl">play_arrow</span>
+                      </button>
+                      <div>
+                        <p class="text-sm font-bold text-on-surface">🎙️ Memento Vocal #${vm.id}</p>
+                        <p class="text-xs text-on-surface-variant">Durată: ${vm.durationSeconds || 5}s • ${dateStr}</p>
+                      </div>
+                    </div>
+                    <input type="radio" name="global_sound" value="${valKey}" ${isSelected ? 'checked' : ''} class="w-5 h-5 text-primary" />
+                  </label>
+                `;
+              }).join('')}
+            </div>
+          `}
         </div>
       </section>
 
@@ -218,13 +260,19 @@ export async function renderNotifications(container, navigateTo) {
       setTimeout(() => {
         lockCard.style.opacity = '1';
         lockCard.style.transform = 'translateY(0)';
-      }, 1500);
+      }, 1000);
     });
   }
 
   if (btnLockSnooze && lockCard) {
     btnLockSnooze.addEventListener('click', () => {
-      alert('Amânare setată cu succes pentru 10 minute!');
+      playNotificationSound('bell', 70);
+      lockCard.style.opacity = '0';
+      lockCard.style.transform = 'translateY(-10px)';
+      setTimeout(() => {
+        lockCard.style.opacity = '1';
+        lockCard.style.transform = 'translateY(0)';
+      }, 1000);
     });
   }
 }
