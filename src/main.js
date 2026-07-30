@@ -1,5 +1,5 @@
-import { initSeedData } from './db.js';
-import { initDoseScheduler } from './scheduler.js';
+import { initSeedData, recordDoseStatus, getTodayString } from './db.js';
+import { initDoseScheduler, snoozeDose } from './scheduler.js';
 import { renderDashboard } from './views/dashboard.js';
 import { renderAddMedication } from './views/addMedication.js';
 import { renderCabinet } from './views/cabinet.js';
@@ -16,6 +16,24 @@ async function initApp() {
   if ('serviceWorker' in navigator) {
     try {
       await navigator.serviceWorker.register('./service-worker.js');
+      
+      navigator.serviceWorker.addEventListener('message', async (event) => {
+        if (event.data && event.data.type === 'NOTIFICATION_ACTION') {
+          const { action, data } = event.data;
+          if (data && data.medId && data.timeStr) {
+            if (action === 'take') {
+              await recordDoseStatus(data.medId, data.timeStr, getTodayString(), 'taken');
+            } else if (action === 'miss') {
+              await recordDoseStatus(data.medId, data.timeStr, getTodayString(), 'missed');
+            } else if (action === 'snooze') {
+              if (data.med) snoozeDose(data.med, data.timeStr);
+            }
+            if (window.refreshCurrentView) {
+              window.refreshCurrentView();
+            }
+          }
+        }
+      });
     } catch (e) {
       console.log('ServiceWorker note:', e.message);
     }
