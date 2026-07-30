@@ -211,19 +211,26 @@ function renderStep2() {
       <div class="bg-surface-container-lowest p-4 rounded-2xl border border-outline-variant/40 shadow-sm space-y-3">
         <label class="text-xs font-bold text-primary uppercase tracking-wider block">Durata tratamentului</label>
         <div class="grid grid-cols-3 gap-2">
-          <button type="button" data-duration="7" class="btn-duration flex flex-col items-center justify-center p-3 border-2 ${formData.durationDays === 7 ? 'border-primary bg-primary-fixed/20 text-primary' : 'border-outline-variant text-on-surface'} rounded-2xl active:scale-95 transition-all">
+          <button type="button" data-duration="7" class="btn-duration flex flex-col items-center justify-center p-3 border-2 ${!formData.isCustomDuration && formData.durationDays === 7 ? 'border-primary bg-primary-fixed/20 text-primary' : 'border-outline-variant text-on-surface'} rounded-2xl active:scale-95 transition-all">
             <span class="text-lg font-bold">7</span>
-            <span class="text-xs">Zile</span>
+            <span class="text-xs font-semibold">Zile</span>
           </button>
-          <button type="button" data-duration="30" class="btn-duration flex flex-col items-center justify-center p-3 border-2 ${formData.durationDays === 30 ? 'border-primary bg-primary-fixed/20 text-primary' : 'border-outline-variant text-on-surface'} rounded-2xl active:scale-95 transition-all">
-            <span class="text-lg font-bold">1</span>
-            <span class="text-xs">Lună</span>
+          <button type="button" data-duration="30" class="btn-duration flex flex-col items-center justify-center p-3 border-2 ${!formData.isCustomDuration && formData.durationDays === 30 ? 'border-primary bg-primary-fixed/20 text-primary' : 'border-outline-variant text-on-surface'} rounded-2xl active:scale-95 transition-all">
+            <span class="text-lg font-bold">30</span>
+            <span class="text-xs font-semibold">Zile (1 Lună)</span>
           </button>
-          <button type="button" data-duration="365" class="btn-duration flex flex-col items-center justify-center p-3 border-2 ${formData.durationDays === 365 ? 'border-primary bg-primary-fixed/20 text-primary' : 'border-outline-variant text-on-surface'} rounded-2xl active:scale-95 transition-all">
-            <span class="material-symbols-outlined">all_inclusive</span>
-            <span class="text-xs">Permanent</span>
+          <button type="button" data-duration="custom" class="btn-duration flex flex-col items-center justify-center p-3 border-2 ${formData.isCustomDuration || (formData.durationDays !== 7 && formData.durationDays !== 30) ? 'border-primary bg-primary-fixed/20 text-primary' : 'border-outline-variant text-on-surface'} rounded-2xl active:scale-95 transition-all">
+            <span class="material-symbols-outlined text-primary">edit_calendar</span>
+            <span class="text-xs font-bold">Personalizat</span>
           </button>
         </div>
+
+        ${formData.isCustomDuration || (formData.durationDays !== 7 && formData.durationDays !== 30) ? `
+          <div class="pt-2">
+            <label for="custom_days_input" class="text-xs font-bold text-on-surface ml-1">Număr zile de tratament:</label>
+            <input id="custom_days_input" type="number" min="1" max="3650" value="${formData.durationDays || 14}" class="w-full h-12 px-4 bg-background border border-outline-variant rounded-xl text-sm font-semibold focus:border-primary outline-none mt-1" placeholder="Ex: 14, 60, 90..." />
+          </div>
+        ` : ''}
       </div>
 
       <!-- Doses Per Day -->
@@ -477,10 +484,27 @@ function attachStepEvents(container, navigateTo) {
   if (currentStep === 2) {
     container.querySelectorAll('.btn-duration').forEach(btn => {
       btn.addEventListener('click', () => {
-        formData.durationDays = Number(btn.getAttribute('data-duration'));
+        const val = btn.getAttribute('data-duration');
+        if (val === 'custom') {
+          formData.isCustomDuration = true;
+          if (formData.durationDays === 7 || formData.durationDays === 30) {
+            formData.durationDays = 14;
+          }
+        } else {
+          formData.isCustomDuration = false;
+          formData.durationDays = Number(val);
+        }
         renderWizardStep(container, navigateTo);
       });
     });
+
+    const inputCustomDays = container.querySelector('#custom_days_input');
+    if (inputCustomDays) {
+      inputCustomDays.addEventListener('input', (e) => {
+        const val = parseInt(e.target.value, 10);
+        formData.durationDays = isNaN(val) || val < 1 ? 1 : val;
+      });
+    }
 
     const btnInc = container.querySelector('#btn-inc-doses');
     const btnDec = container.querySelector('#btn-dec-doses');
