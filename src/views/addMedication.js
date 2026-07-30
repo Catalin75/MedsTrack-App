@@ -1,4 +1,4 @@
-import { saveMedication, getMedication, getTodayString } from '../db.js';
+import { saveMedication, getMedication, getTodayString, getVoiceMemos, saveVoiceMemo } from '../db.js';
 import { playNotificationSound, startRecording, stopRecording, playAudioBlob } from '../audio.js';
 
 let currentStep = 1;
@@ -22,12 +22,14 @@ let formData = {
   totalStock: 20,
   remainingStock: 20,
   voiceBlob: null,
-  voiceDuration: 0
+  voiceDuration: 0,
+  savedVoiceMemos: []
 };
 
 export async function renderAddMedication(container, navigateTo, editId = null) {
   currentStep = 1;
   isEditing = !!editId;
+  const savedMemos = await getVoiceMemos();
 
   if (editId) {
     const existing = await getMedication(editId);
@@ -55,7 +57,8 @@ export async function renderAddMedication(container, navigateTo, editId = null) 
         remainingStock: isUnlim ? 'unlimited' : (existing.remainingStock !== undefined ? existing.remainingStock : existing.totalStock || 20),
         startDate: existing.startDate || getTodayString(),
         voiceBlob: null,
-        voiceDuration: 0
+        voiceDuration: 0,
+        savedVoiceMemos: savedMemos || []
       };
     }
   } else {
@@ -79,7 +82,8 @@ export async function renderAddMedication(container, navigateTo, editId = null) 
       remainingStock: 20,
       startDate: getTodayString(),
       voiceBlob: null,
-      voiceDuration: 0
+      voiceDuration: 0,
+      savedVoiceMemos: savedMemos || []
     };
   }
 
@@ -355,6 +359,33 @@ function renderStep3() {
               <input type="radio" name="sound_choice" value="${s.id}" ${formData.soundChoice === s.id ? 'checked' : ''} class="w-5 h-5 text-primary" />
             </label>
           `).join('')}
+
+          ${formData.savedVoiceMemos && formData.savedVoiceMemos.length > 0 ? `
+            <div class="pt-2 space-y-2">
+              <label class="text-xs font-bold text-tertiary uppercase tracking-wider px-1 block flex items-center gap-1.5">
+                <span class="material-symbols-outlined text-base">mic</span>
+                <span>Mementouri Vocale Înregistrate</span>
+              </label>
+              ${formData.savedVoiceMemos.map(vm => {
+                const vKey = `voice_${vm.id}`;
+                const isSel = formData.soundChoice === vKey;
+                return `
+                  <label class="flex items-center justify-between bg-surface-container-lowest p-3.5 rounded-2xl border-2 ${isSel ? 'border-primary bg-primary-fixed/10' : 'border-outline-variant/30'} cursor-pointer transition-all">
+                    <div class="flex items-center gap-3">
+                      <button type="button" data-sound="${vKey}" class="btn-preview-sound w-9 h-9 flex items-center justify-center bg-tertiary-fixed rounded-full text-tertiary hover:scale-105 active:scale-95 transition-all">
+                        <span class="material-symbols-outlined text-xl">play_arrow</span>
+                      </button>
+                      <div>
+                        <p class="text-sm font-bold text-on-surface">🎙️ Memento Vocal #${vm.id}</p>
+                        <p class="text-xs text-on-surface-variant">Durată: ${vm.durationSeconds || 5}s</p>
+                      </div>
+                    </div>
+                    <input type="radio" name="sound_choice" value="${vKey}" ${isSel ? 'checked' : ''} class="w-5 h-5 text-primary" />
+                  </label>
+                `;
+              }).join('')}
+            </div>
+          ` : ''}
         </div>
       </div>
 
@@ -682,6 +713,10 @@ function attachStepEvents(container, navigateTo) {
           if (res) {
             formData.voiceBlob = res.blob;
             formData.voiceDuration = res.durationSeconds;
+            const memoId = await saveVoiceMemo(res.blob, res.durationSeconds);
+            formData.voiceMemoId = memoId;
+            formData.soundChoice = `voice_${memoId}`;
+            formData.savedVoiceMemos = await getVoiceMemos();
           }
           renderWizardStep(container, navigateTo);
         }
