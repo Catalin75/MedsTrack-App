@@ -125,9 +125,7 @@ function renderCabinetCard(med) {
                 </span>
               ` : ''}
             </div>
-            <span class="inline-flex items-center px-2 py-0.5 rounded-md bg-surface-container-high text-on-surface-variant text-xs font-medium mt-1">
-              ${med.mealReminder ? 'Înainte de masă' : 'Fără restricție alimentară'}
-            </span>
+            <p class="text-xs font-semibold text-on-surface-variant mt-0.5">${med.dosageDisplay || '1 comprimat'}</p>
           </div>
         </div>
         <div class="text-right">
