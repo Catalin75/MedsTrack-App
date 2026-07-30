@@ -155,7 +155,7 @@ export async function getLogsForDate(dateStr) {
   });
 }
 
-export async function toggleDoseLog(medicationId, scheduledTime, dateStr) {
+export async function recordDoseStatus(medicationId, scheduledTime, dateStr, status) {
   const db = await openDB();
   const numMedId = Number(medicationId);
   const logs = await getLogsForDate(dateStr);
@@ -172,22 +172,26 @@ export async function toggleDoseLog(medicationId, scheduledTime, dateStr) {
       const med = medReq.result;
       const isUnlimited = med && (med.isUnlimited || med.totalStock === 'unlimited');
 
+      // Revert previous stock if existing log was taken
       if (existingLog) {
         logStore.delete(existingLog.id);
-        if (med && !isUnlimited) {
+        if (existingLog.taken && med && !isUnlimited) {
           const currentRem = typeof med.remainingStock === 'number'
             ? med.remainingStock
             : parseInt(med.remainingStock !== undefined ? med.remainingStock : (med.totalStock || 20), 10);
           med.remainingStock = (isNaN(currentRem) ? 20 : currentRem) + 1;
           medStore.put(med);
         }
-        resolve({ taken: false, remainingStock: med ? med.remainingStock : 0 });
-      } else {
+      }
+
+      if (status === 'taken') {
         logStore.add({
           medicationId: numMedId,
           scheduledTime,
           date: dateStr,
+          status: 'taken',
           taken: true,
+          missed: false,
           takenAt: new Date().toISOString()
         });
         if (med && !isUnlimited) {
@@ -200,10 +204,37 @@ export async function toggleDoseLog(medicationId, scheduledTime, dateStr) {
             medStore.put(med);
           }
         }
-        resolve({ taken: true, remainingStock: med ? med.remainingStock : 0 });
+        resolve({ status: 'taken', taken: true, missed: false, remainingStock: med ? med.remainingStock : 0 });
+      } else if (status === 'missed') {
+        logStore.add({
+          medicationId: numMedId,
+          scheduledTime,
+          date: dateStr,
+          status: 'missed',
+          taken: false,
+          missed: true,
+          recordedAt: new Date().toISOString()
+        });
+        // Stock remains UNCHANGED when status is missed!
+        resolve({ status: 'missed', taken: false, missed: true, remainingStock: med ? med.remainingStock : 0 });
+      } else {
+        // Log cleared
+        resolve({ status: 'cleared', taken: false, missed: false, remainingStock: med ? med.remainingStock : 0 });
       }
     };
   });
+}
+
+export async function toggleDoseLog(medicationId, scheduledTime, dateStr) {
+  const numMedId = Number(medicationId);
+  const logs = await getLogsForDate(dateStr);
+  const existingLog = logs.find(l => Number(l.medicationId) === numMedId && l.scheduledTime === scheduledTime);
+
+  if (existingLog && existingLog.taken) {
+    return await recordDoseStatus(medicationId, scheduledTime, dateStr, 'cleared');
+  } else {
+    return await recordDoseStatus(medicationId, scheduledTime, dateStr, 'taken');
+  }
 }
 
 export async function saveVoiceMemo(blob, durationSeconds) {
