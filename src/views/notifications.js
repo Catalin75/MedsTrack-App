@@ -141,50 +141,6 @@ export async function renderNotifications(container, navigateTo) {
         </div>
       </section>
 
-      <!-- Lock Screen Preview Section -->
-      <section class="space-y-2">
-        <h2 class="text-xs font-bold uppercase tracking-wider text-outline px-1">Previzualizare Notificare Ecran Blocat</h2>
-        <div class="relative w-full h-56 rounded-3xl overflow-hidden shadow-lg border border-outline-variant/30 bg-slate-950 flex flex-col justify-between p-4">
-          <!-- Background Wallpaper Effect -->
-          <div class="absolute inset-0 bg-gradient-to-b from-blue-900/40 via-purple-900/20 to-slate-950/90 z-0"></div>
-
-          <!-- Lockscreen Clock -->
-          <div class="relative z-10 text-center mt-2 text-white">
-            <h3 class="text-4xl font-light tracking-tight">14:00</h3>
-            <p class="text-xs font-medium text-white/80">Marți, 24 Octombrie</p>
-          </div>
-
-          <!-- Floating Notification Card -->
-          <div id="lockscreen-card" class="relative z-10 glass-card bg-white/90 rounded-2xl p-3.5 shadow-xl border border-white/40 space-y-2 transition-all duration-300">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <div class="w-7 h-7 bg-primary rounded-lg flex items-center justify-center text-white">
-                  <span class="material-symbols-outlined text-sm">medical_services</span>
-                </div>
-                <div>
-                  <span class="text-xs font-bold text-on-surface block leading-tight">💊 Memento Medicament</span>
-                  <span class="text-[9px] text-outline font-bold uppercase">Acum</span>
-                </div>
-              </div>
-              <span class="material-symbols-outlined text-outline text-sm">expand_more</span>
-            </div>
-
-            <div>
-              <h4 class="text-xs font-bold text-on-surface">Amoxicilină - 1 comprimat</h4>
-              <p class="text-[11px] text-on-surface-variant">Este ora 14:00. Vă rugăm să luați doza stabilită.</p>
-            </div>
-
-            <div class="flex gap-2 pt-1">
-              <button id="btn-lock-take" class="flex-1 py-1.5 bg-primary text-on-primary rounded-lg text-xs font-bold shadow-sm active:scale-95 transition-all">
-                Am luat
-              </button>
-              <button id="btn-lock-snooze" class="flex-1 py-1.5 border border-outline/50 text-primary rounded-lg text-xs font-bold active:scale-95 transition-all">
-                Amână 10 min
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
     </main>
   `;
 
@@ -246,33 +202,4 @@ export async function renderNotifications(container, navigateTo) {
       renderNotifications(container, navigateTo);
     });
   });
-
-  // Lockscreen Card interactions
-  const lockCard = container.querySelector('#lockscreen-card');
-  const btnLockTake = container.querySelector('#btn-lock-take');
-  const btnLockSnooze = container.querySelector('#btn-lock-snooze');
-
-  if (btnLockTake && lockCard) {
-    btnLockTake.addEventListener('click', () => {
-      playNotificationSound('bell', 70);
-      lockCard.style.opacity = '0';
-      lockCard.style.transform = 'translateY(-10px)';
-      setTimeout(() => {
-        lockCard.style.opacity = '1';
-        lockCard.style.transform = 'translateY(0)';
-      }, 1000);
-    });
-  }
-
-  if (btnLockSnooze && lockCard) {
-    btnLockSnooze.addEventListener('click', () => {
-      playNotificationSound('bell', 70);
-      lockCard.style.opacity = '0';
-      lockCard.style.transform = 'translateY(-10px)';
-      setTimeout(() => {
-        lockCard.style.opacity = '1';
-        lockCard.style.transform = 'translateY(0)';
-      }, 1000);
-    });
-  }
 }
