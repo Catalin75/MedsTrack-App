@@ -10,5 +10,11 @@
   },
   "devDependencies": {
     "vite": "^5.4.14"
+  },
+  "dependencies": {
+    "@capacitor/core": "^7.4.3",
+    "@capacitor/cli": "^7.4.3",
+    "@capacitor/android": "^7.4.3",
+    "@capacitor/local-notifications": "^7.0.3"
   }
 }
