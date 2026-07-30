@@ -8,6 +8,8 @@ export async function renderDashboard(container, navigateTo) {
   const meds = await getMedications();
   const logs = await getLogsForDate(selectedDate);
 
+  const isTodaySelected = selectedDate === getTodayString();
+
   // Group medications by daily periods
   const scheduleItems = [];
 
@@ -57,19 +59,30 @@ export async function renderDashboard(container, navigateTo) {
           M
         </div>
         <div>
-          <h1 class="text-xl font-bold text-on-surface leading-snug">Bună dimineața!</h1>
+          <h1 class="text-xl font-bold text-on-surface leading-snug">
+            ${isTodaySelected ? 'Bună dimineața!' : 'Calendar Tratament'}
+          </h1>
           <p class="text-xs text-outline font-medium">${formattedHeaderDate}</p>
         </div>
       </div>
       <div class="flex items-center gap-1">
+        ${!isTodaySelected ? `
+          <button id="btn-today-jump" title="Revino la ziua de Astăzi" class="px-2.5 py-1 text-[11px] font-bold text-primary bg-primary-fixed/40 hover:bg-primary-fixed rounded-full transition-all flex items-center gap-1">
+            <span class="material-symbols-outlined text-sm">today</span>
+            <span>Astăzi</span>
+          </button>
+        ` : ''}
         ${meds.length > 0 ? `
           <button id="btn-reset-data" title="Șterge toate datele" class="px-2.5 py-1 text-[11px] font-semibold text-error/80 hover:text-error hover:bg-error-container/30 rounded-full transition-all">
             Resetare
           </button>
         ` : ''}
-        <button id="calendar-btn" class="w-9 h-9 flex items-center justify-center rounded-full hover:bg-surface-container-low transition-colors active:scale-95 text-primary">
-          <span class="material-symbols-outlined text-xl">calendar_today</span>
-        </button>
+        <div class="relative">
+          <button id="calendar-btn" title="Selectează altă dată din calendar" class="w-9 h-9 flex items-center justify-center rounded-full hover:bg-surface-container-low transition-colors active:scale-95 text-primary">
+            <span class="material-symbols-outlined text-xl">calendar_today</span>
+          </button>
+          <input type="date" id="hidden-date-picker" value="${selectedDate}" class="sr-only" />
+        </div>
       </div>
     </header>
 
@@ -144,6 +157,36 @@ export async function renderDashboard(container, navigateTo) {
     });
   });
 
+  // Calendar Icon Button Handler: trigger native date picker
+  const btnCalendar = container.querySelector('#calendar-btn');
+  const hiddenDatePicker = container.querySelector('#hidden-date-picker');
+
+  if (btnCalendar && hiddenDatePicker) {
+    btnCalendar.addEventListener('click', () => {
+      if (typeof hiddenDatePicker.showPicker === 'function') {
+        hiddenDatePicker.showPicker();
+      } else {
+        hiddenDatePicker.click();
+      }
+    });
+
+    hiddenDatePicker.addEventListener('change', (e) => {
+      if (e.target.value) {
+        selectedDate = e.target.value;
+        renderDashboard(container, navigateTo);
+      }
+    });
+  }
+
+  // Jump back to Today button handler
+  const btnTodayJump = container.querySelector('#btn-today-jump');
+  if (btnTodayJump) {
+    btnTodayJump.addEventListener('click', () => {
+      selectedDate = getTodayString();
+      renderDashboard(container, navigateTo);
+    });
+  }
+
   container.querySelectorAll('.toggle-dose-btn').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       const medId = Number(btn.getAttribute('data-med-id'));
@@ -151,7 +194,7 @@ export async function renderDashboard(container, navigateTo) {
 
       const res = await toggleDoseLog(medId, timeStr, selectedDate);
       if (res.taken) {
-        playNotificationSound('bell', 60);
+        playNotificationSound('bell', 60, 1);
       }
       renderDashboard(container, navigateTo);
     });
