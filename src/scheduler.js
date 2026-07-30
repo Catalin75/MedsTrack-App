@@ -69,8 +69,8 @@ export async function checkScheduledDoses() {
 
           notifiedDosesSet.add(key);
 
-          // 1. Play Audio Alarm Tone
-          playNotificationSound(med.soundChoice || 'bell', med.criticalAlert ? 100 : 80);
+          // 1. Play Audio Alarm Tone (Repeated 3 times)
+          playNotificationSound(med.soundChoice || 'bell', med.criticalAlert ? 100 : 80, 3);
 
           // 2. Trigger Web/System Notification
           sendWebNotification(med, timeStr);
@@ -86,14 +86,19 @@ export async function checkScheduledDoses() {
 }
 
 /**
- * Sends a system desktop/mobile Web Notification with 3 Action Buttons.
+ * Sends a system desktop/mobile Web Notification with detailed header (Treatment + Medication) and 3 Actions.
  */
 function sendWebNotification(med, timeStr) {
   if (!('Notification' in window)) return;
 
-  const title = ` Memento Medicament: ${med.name}`;
+  const categoryPart = med.treatmentCategory ? `[${med.treatmentCategory}] ` : '';
+  const title = `💊 ${categoryPart}${med.name}`;
+
+  const isUnlim = med.isUnlimited || med.totalStock === 'unlimited';
+  const stockStr = isUnlim ? 'Nelimitat (∞)' : `${med.remainingStock !== undefined ? med.remainingStock : (med.totalStock || 20)} doze`;
+
   const options = {
-    body: `Ora ${timeStr} - ${med.dosageDisplay || '1 doză'}`,
+    body: `⏰ Ora ${timeStr} • Doză: ${med.dosageDisplay || '1 comprimat'}\n📋 Forma: ${med.formLabel || 'Comprimat'} • Stoc: ${stockStr}`,
     icon: '/manifest.json',
     tag: `dose_${med.id}_${todayStringClean(timeStr)}`,
     renotify: true,
@@ -131,14 +136,14 @@ export function snoozeDose(med, timeStr) {
   showToast(`Notificarea pentru ${med.name} (${timeStr}) a fost amânată cu 10 minute.`);
 
   setTimeout(() => {
-    playNotificationSound(med.soundChoice || 'bell', med.criticalAlert ? 100 : 80);
+    playNotificationSound(med.soundChoice || 'bell', med.criticalAlert ? 100 : 80, 3);
     sendWebNotification(med, timeStr);
     displayInAppDoseModal(med, timeStr);
   }, 10 * 60 * 1000);
 }
 
 /**
- * Displays a 3-button modal alert inside the application interface.
+ * Displays a detailed 3-button modal alert inside the application interface.
  */
 export function displayInAppDoseModal(med, timeStr) {
   const existing = document.getElementById('dose-alarm-modal');
@@ -146,38 +151,68 @@ export function displayInAppDoseModal(med, timeStr) {
     existing.remove();
   }
 
+  const isUnlim = med.isUnlimited || med.totalStock === 'unlimited';
+  const stockStr = isUnlim ? 'Nelimitat (∞)' : `${med.remainingStock !== undefined ? med.remainingStock : (med.totalStock || 20)} doze`;
+
   const modal = document.createElement('div');
   modal.id = 'dose-alarm-modal';
-  modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in duration-300';
+  modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in duration-300';
   modal.innerHTML = `
     <div class="bg-surface-container-lowest w-full max-w-sm rounded-3xl p-6 shadow-2xl border-2 border-primary/50 text-center space-y-4 animate-in zoom-in-95 duration-200">
-      <div class="w-16 h-16 bg-primary-fixed rounded-full flex items-center justify-center text-primary mx-auto animate-bounce">
+      
+      <!-- Icon & Alarm Header Badge -->
+      <div class="w-16 h-16 bg-primary-fixed rounded-full flex items-center justify-center text-primary mx-auto animate-bounce shadow-md">
         <span class="material-symbols-outlined text-4xl">notifications_active</span>
       </div>
-      <div>
-        <span class="inline-block px-3 py-1 bg-primary-fixed text-primary font-bold text-xs rounded-full mb-1.5">
-          Ora limită: ${timeStr}
-        </span>
-        <h2 class="text-xl font-bold text-on-surface">${med.name}</h2>
-        <p class="text-base font-bold text-primary mt-1">${med.dosageDisplay || '1 doză'}</p>
+
+      <div class="space-y-1">
+        ${med.treatmentCategory ? `
+          <span class="inline-block px-3 py-1 bg-secondary-container text-on-secondary-container font-extrabold text-xs rounded-full uppercase tracking-wider mb-1">
+            Tratament: ${med.treatmentCategory}
+          </span>
+        ` : `
+          <span class="inline-block px-3 py-1 bg-primary-fixed text-primary font-bold text-xs rounded-full mb-1">
+            Memento Administrare
+          </span>
+        `}
+
+        <h2 class="text-2xl font-black text-on-surface leading-tight">${med.name}</h2>
+        <p class="text-xs text-outline font-medium">Ora programată: <strong class="text-primary">${timeStr}</strong></p>
       </div>
 
-      <div class="pt-2 flex flex-col gap-2.5">
+      <!-- Detailed Info Box -->
+      <div class="bg-surface-container-low p-3.5 rounded-2xl border border-outline-variant/30 space-y-1.5 text-xs text-left">
+        <div class="flex justify-between items-center">
+          <span class="text-outline font-medium">Cantitate / Doză:</span>
+          <span class="font-bold text-primary text-sm">${med.dosageDisplay || '1 comprimat'}</span>
+        </div>
+        <div class="flex justify-between items-center pt-1 border-t border-outline-variant/20">
+          <span class="text-outline font-medium">Forma farmaceutică:</span>
+          <span class="font-bold text-on-surface">${med.formLabel || 'Comprimat'}</span>
+        </div>
+        <div class="flex justify-between items-center pt-1 border-t border-outline-variant/20">
+          <span class="text-outline font-medium">Stoc disponibil:</span>
+          <span class="font-bold ${isUnlim ? 'text-primary' : 'text-on-surface'}">${stockStr}</span>
+        </div>
+      </div>
+
+      <!-- 3 Action Buttons -->
+      <div class="pt-1 flex flex-col gap-2.5">
         <!-- Button 1: Luat -->
         <button id="btn-modal-take-dose" class="w-full h-12 bg-primary text-on-primary font-bold rounded-2xl shadow-lg hover:bg-primary-container active:scale-95 transition-all flex items-center justify-center gap-2 text-sm">
-          <span class="material-symbols-outlined text-lg">check_circle</span>
+          <span class="material-symbols-outlined text-xl">check_circle</span>
           <span>Luat</span>
         </button>
 
         <!-- Button 2: Amână 10 minute -->
         <button id="btn-modal-snooze-dose" class="w-full h-12 bg-secondary-container text-on-secondary-container font-bold rounded-2xl hover:bg-secondary-container/80 active:scale-95 transition-all flex items-center justify-center gap-2 text-sm">
-          <span class="material-symbols-outlined text-lg">schedule</span>
+          <span class="material-symbols-outlined text-xl">schedule</span>
           <span>Amână 10 minute</span>
         </button>
 
         <!-- Button 3: Ratat -->
         <button id="btn-modal-miss-dose" class="w-full h-12 bg-error-container/40 text-error font-bold rounded-2xl hover:bg-error-container active:scale-95 transition-all flex items-center justify-center gap-2 text-sm">
-          <span class="material-symbols-outlined text-lg">cancel</span>
+          <span class="material-symbols-outlined text-xl">cancel</span>
           <span>Ratat</span>
         </button>
       </div>
