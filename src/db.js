@@ -94,7 +94,18 @@ export async function getMedications() {
     const tx = db.transaction('medications', 'readonly');
     const store = tx.objectStore('medications');
     const request = store.getAll();
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const results = request.result || [];
+      const normalized = results.map(med => {
+        const isUnlim = med.isUnlimited || med.totalStock === 'unlimited';
+        if (!isUnlim && (med.remainingStock === undefined || med.remainingStock === null)) {
+          const tot = typeof med.totalStock === 'number' ? med.totalStock : parseInt(med.totalStock || 20, 10);
+          med.remainingStock = isNaN(tot) ? 20 : tot;
+        }
+        return med;
+      });
+      resolve(normalized);
+    };
     request.onerror = (e) => reject(e.target.error);
   });
 }
@@ -146,14 +157,15 @@ export async function getLogsForDate(dateStr) {
 
 export async function toggleDoseLog(medicationId, scheduledTime, dateStr) {
   const db = await openDB();
+  const numMedId = Number(medicationId);
   const logs = await getLogsForDate(dateStr);
-  const existingLog = logs.find(l => l.medicationId === medicationId && l.scheduledTime === scheduledTime);
+  const existingLog = logs.find(l => Number(l.medicationId) === numMedId && l.scheduledTime === scheduledTime);
 
   const tx = db.transaction(['logs', 'medications'], 'readwrite');
   const logStore = tx.objectStore('logs');
   const medStore = tx.objectStore('medications');
 
-  const medReq = medStore.get(medicationId);
+  const medReq = medStore.get(numMedId);
 
   return new Promise((resolve) => {
     medReq.onsuccess = () => {
@@ -162,22 +174,31 @@ export async function toggleDoseLog(medicationId, scheduledTime, dateStr) {
 
       if (existingLog) {
         logStore.delete(existingLog.id);
-        if (med && !isUnlimited && typeof med.remainingStock === 'number') {
-          med.remainingStock += 1;
+        if (med && !isUnlimited) {
+          const currentRem = typeof med.remainingStock === 'number'
+            ? med.remainingStock
+            : parseInt(med.remainingStock !== undefined ? med.remainingStock : (med.totalStock || 20), 10);
+          med.remainingStock = (isNaN(currentRem) ? 20 : currentRem) + 1;
           medStore.put(med);
         }
         resolve({ taken: false, remainingStock: med ? med.remainingStock : 0 });
       } else {
         logStore.add({
-          medicationId,
+          medicationId: numMedId,
           scheduledTime,
           date: dateStr,
           taken: true,
           takenAt: new Date().toISOString()
         });
-        if (med && !isUnlimited && typeof med.remainingStock === 'number' && med.remainingStock > 0) {
-          med.remainingStock -= 1;
-          medStore.put(med);
+        if (med && !isUnlimited) {
+          const currentRem = typeof med.remainingStock === 'number'
+            ? med.remainingStock
+            : parseInt(med.remainingStock !== undefined ? med.remainingStock : (med.totalStock || 20), 10);
+          const validRem = isNaN(currentRem) ? 20 : currentRem;
+          if (validRem > 0) {
+            med.remainingStock = validRem - 1;
+            medStore.put(med);
+          }
         }
         resolve({ taken: true, remainingStock: med ? med.remainingStock : 0 });
       }
