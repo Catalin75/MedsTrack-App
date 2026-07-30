@@ -269,17 +269,42 @@ function renderStep2() {
           </div>
         </div>
 
-        <!-- Dynamic Time Pickers -->
+        <!-- Dynamic 24-Hour Time Pickers (00:00 - 23:59) -->
         <div id="times-picker-container" class="space-y-2.5 pt-2">
-          ${formData.times.map((t, idx) => `
-            <div class="flex items-center justify-between p-3 bg-surface-container-low rounded-xl border border-outline-variant/30">
-              <div class="flex items-center gap-3">
-                <span class="material-symbols-outlined text-primary">schedule</span>
-                <span class="text-sm font-semibold text-on-surface">Doză ${idx + 1}</span>
+          ${formData.times.map((t, idx) => {
+            const parts = (t || '08:00').split(':');
+            const curH = parts[0] ? parts[0].padStart(2, '0') : '08';
+            const curM = parts[1] ? parts[1].padStart(2, '0') : '00';
+
+            const hourOptions = Array.from({length: 24}, (_, h) => {
+              const hh = String(h).padStart(2, '0');
+              return `<option value="${hh}" ${curH === hh ? 'selected' : ''}>${hh}</option>`;
+            }).join('');
+
+            const minuteOptions = Array.from({length: 60}, (_, m) => {
+              const mm = String(m).padStart(2, '0');
+              return `<option value="${mm}" ${curM === mm ? 'selected' : ''}>${mm}</option>`;
+            }).join('');
+
+            return `
+              <div class="flex items-center justify-between p-3 bg-surface-container-low rounded-xl border border-outline-variant/30">
+                <div class="flex items-center gap-3">
+                  <span class="material-symbols-outlined text-primary">schedule</span>
+                  <span class="text-sm font-semibold text-on-surface">Doză ${idx + 1}</span>
+                </div>
+                <div class="flex items-center gap-1 bg-surface-container-lowest border border-outline-variant/60 rounded-xl px-3 py-1.5 shadow-sm">
+                  <select data-time-index="${idx}" data-time-part="hour" class="time-select-part bg-transparent text-base font-bold text-primary focus:outline-none cursor-pointer">
+                    ${hourOptions}
+                  </select>
+                  <span class="font-bold text-primary text-base select-none">:</span>
+                  <select data-time-index="${idx}" data-time-part="minute" class="time-select-part bg-transparent text-base font-bold text-primary focus:outline-none cursor-pointer">
+                    ${minuteOptions}
+                  </select>
+                  <span class="text-xs font-semibold text-on-surface-variant ml-1">ora</span>
+                </div>
               </div>
-              <input type="time" data-time-index="${idx}" value="${t}" class="time-input bg-transparent border-none text-base font-bold text-primary focus:ring-0 cursor-pointer" />
-            </div>
-          `).join('')}
+            `;
+          }).join('')}
         </div>
       </div>
 
@@ -592,10 +617,17 @@ function attachStepEvents(container, navigateTo) {
       });
     }
 
-    container.querySelectorAll('.time-input').forEach(input => {
-      input.addEventListener('change', (e) => {
+    container.querySelectorAll('.time-select-part').forEach(select => {
+      select.addEventListener('change', (e) => {
         const idx = Number(e.target.getAttribute('data-time-index'));
-        formData.times[idx] = e.target.value;
+        const parentDiv = e.target.parentElement;
+        if (parentDiv) {
+          const hSel = parentDiv.querySelector('[data-time-part="hour"]');
+          const mSel = parentDiv.querySelector('[data-time-part="minute"]');
+          if (hSel && mSel) {
+            formData.times[idx] = `${hSel.value}:${mSel.value}`;
+          }
+        }
       });
     });
 
