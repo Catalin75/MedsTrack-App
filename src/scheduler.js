@@ -1,5 +1,5 @@
 // Real-time Dose Scheduler & Background Notification Service for MedsTrack
-import { getMedications, getLogsForDate, getTodayString, toggleDoseLog } from './db.js';
+import { getMedications, getLogsForDate, getTodayString, recordDoseStatus } from './db.js';
 import { playNotificationSound } from './audio.js';
 
 let schedulerInterval = null;
@@ -16,15 +16,11 @@ export function initDoseScheduler() {
     });
   }
 
-  // Clear existing interval if re-initialized
   if (schedulerInterval) {
     clearInterval(schedulerInterval);
   }
 
-  // Initial check on load
   checkScheduledDoses();
-
-  // Run check every 10 seconds to catch exact minute transitions
   schedulerInterval = setInterval(checkScheduledDoses, 10000);
 }
 
@@ -47,7 +43,6 @@ export async function checkScheduledDoses() {
         continue;
       }
 
-      // Verify treatment date range
       if (med.startDate && med.durationDays) {
         const start = new Date(med.startDate);
         const todayDate = new Date(todayStr);
@@ -55,7 +50,7 @@ export async function checkScheduledDoses() {
         const diffDays = Math.floor(diffTime / (1000 * 3600 * 24));
 
         if (diffDays < 0 || diffDays >= med.durationDays) {
-          continue; // Medication is not active for today
+          continue;
         }
       }
 
@@ -64,16 +59,14 @@ export async function checkScheduledDoses() {
 
         const key = `${med.id}_${todayStr}_${timeStr}`;
 
-        // Check if current system time matches the scheduled dose time
         if (timeStr === currentTimeStr) {
-          // Check if dose was already taken today
-          const isAlreadyTaken = todayLogs.some(l => l.medicationId === med.id && l.scheduledTime === timeStr && l.taken);
+          // Check if dose has already been logged (either taken or missed)
+          const isLogged = todayLogs.some(l => l.medicationId === med.id && l.scheduledTime === timeStr);
           
-          if (isAlreadyTaken || notifiedDosesSet.has(key)) {
+          if (isLogged || notifiedDosesSet.has(key)) {
             continue;
           }
 
-          // Mark dose as notified for today
           notifiedDosesSet.add(key);
 
           // 1. Play Audio Alarm Tone
@@ -93,18 +86,23 @@ export async function checkScheduledDoses() {
 }
 
 /**
- * Sends a system desktop/mobile Web Notification.
+ * Sends a system desktop/mobile Web Notification with 3 Action Buttons.
  */
 function sendWebNotification(med, timeStr) {
   if (!('Notification' in window)) return;
 
   const title = ` Memento Medicament: ${med.name}`;
   const options = {
-    body: `Ora ${timeStr} - Este timpul pentru ${med.dosageDisplay || 'doza programată'}.\n${med.mealReminder ? 'Înainte de masă' : 'Tratament cronic'}`,
+    body: `Ora ${timeStr} - ${med.dosageDisplay || '1 doză'}\n${med.mealReminder ? 'Înainte de masă' : 'Tratament cronic'}`,
     icon: '/manifest.json',
     tag: `dose_${med.id}_${todayStringClean(timeStr)}`,
     renotify: true,
-    requireInteraction: med.criticalAlert || false
+    requireInteraction: true,
+    actions: [
+      { action: 'take', title: ' Luat' },
+      { action: 'snooze', title: ' Amână 10 min' },
+      { action: 'miss', title: ' Ratat' }
+    ]
   };
 
   if (Notification.permission === 'granted') {
@@ -127,7 +125,20 @@ function todayStringClean(timeStr) {
 }
 
 /**
- * Displays a full modal alert inside the application interface.
+ * Snoozes a notification for 10 minutes without modifying DB or stock.
+ */
+export function snoozeDose(med, timeStr) {
+  showToast(`Notificarea pentru ${med.name} (${timeStr}) a fost amânată cu 10 minute.`);
+
+  setTimeout(() => {
+    playNotificationSound(med.soundChoice || 'bell', med.criticalAlert ? 100 : 80);
+    sendWebNotification(med, timeStr);
+    displayInAppDoseModal(med, timeStr);
+  }, 10 * 60 * 1000);
+}
+
+/**
+ * Displays a 3-button modal alert inside the application interface.
  */
 export function displayInAppDoseModal(med, timeStr) {
   const existing = document.getElementById('dose-alarm-modal');
@@ -152,13 +163,23 @@ export function displayInAppDoseModal(med, timeStr) {
         ${med.mealReminder ? '<p class="text-xs font-bold text-secondary mt-1"> Memento înainte de masă (30 min)</p>' : ''}
       </div>
 
-      <div class="pt-2 flex flex-col gap-2">
-        <button id="btn-modal-take-dose" class="w-full h-13 bg-primary text-on-primary font-bold rounded-2xl shadow-lg hover:bg-primary-container active:scale-95 transition-all flex items-center justify-center gap-2 text-base">
-          <span class="material-symbols-outlined text-xl">check_circle</span>
-          <span>Am luat medicamentul</span>
+      <div class="pt-2 flex flex-col gap-2.5">
+        <!-- Button 1: Luat -->
+        <button id="btn-modal-take-dose" class="w-full h-12 bg-primary text-on-primary font-bold rounded-2xl shadow-lg hover:bg-primary-container active:scale-95 transition-all flex items-center justify-center gap-2 text-sm">
+          <span class="material-symbols-outlined text-lg">check_circle</span>
+          <span>Luat</span>
         </button>
-        <button id="btn-modal-close-alert" class="w-full h-10 bg-surface-container-high text-on-surface-variant font-semibold rounded-2xl hover:bg-surface-variant active:scale-95 transition-all text-xs">
-          Închide alertă
+
+        <!-- Button 2: Amână 10 minute -->
+        <button id="btn-modal-snooze-dose" class="w-full h-12 bg-secondary-container text-on-secondary-container font-bold rounded-2xl hover:bg-secondary-container/80 active:scale-95 transition-all flex items-center justify-center gap-2 text-sm">
+          <span class="material-symbols-outlined text-lg">schedule</span>
+          <span>Amână 10 minute</span>
+        </button>
+
+        <!-- Button 3: Ratat -->
+        <button id="btn-modal-miss-dose" class="w-full h-12 bg-error-container/40 text-error font-bold rounded-2xl hover:bg-error-container active:scale-95 transition-all flex items-center justify-center gap-2 text-sm">
+          <span class="material-symbols-outlined text-lg">cancel</span>
+          <span>Ratat</span>
         </button>
       </div>
     </div>
@@ -166,21 +187,44 @@ export function displayInAppDoseModal(med, timeStr) {
 
   document.body.appendChild(modal);
 
-  const btnTake = modal.querySelector('#btn-modal-take-dose');
-  if (btnTake) {
-    btnTake.addEventListener('click', async () => {
-      await toggleDoseLog(med.id, timeStr, getTodayString());
-      modal.remove();
-      if (window.refreshCurrentView) {
-        window.refreshCurrentView();
-      }
-    });
-  }
+  // 1. Action LUAT
+  modal.querySelector('#btn-modal-take-dose').addEventListener('click', async () => {
+    await recordDoseStatus(med.id, timeStr, getTodayString(), 'taken');
+    modal.remove();
+    showToast(`Doza de ${med.name} a fost marcată ca Luată. Stocul s-a actualizat.`);
+    if (window.refreshCurrentView) {
+      window.refreshCurrentView();
+    }
+  });
 
-  const btnClose = modal.querySelector('#btn-modal-close-alert');
-  if (btnClose) {
-    btnClose.addEventListener('click', () => {
-      modal.remove();
-    });
-  }
+  // 2. Action AMÂNĂ 10 MINUTE
+  modal.querySelector('#btn-modal-snooze-dose').addEventListener('click', () => {
+    modal.remove();
+    snoozeDose(med, timeStr);
+  });
+
+  // 3. Action RATAT
+  modal.querySelector('#btn-modal-miss-dose').addEventListener('click', async () => {
+    await recordDoseStatus(med.id, timeStr, getTodayString(), 'missed');
+    modal.remove();
+    showToast(`Doza de ${med.name} a fost marcată ca Ratată. Stocul nu s-a modificat.`);
+    if (window.refreshCurrentView) {
+      window.refreshCurrentView();
+    }
+  });
+}
+
+function showToast(message) {
+  const existing = document.getElementById('app-toast');
+  if (existing) existing.remove();
+
+  const toast = document.createElement('div');
+  toast.id = 'app-toast';
+  toast.className = 'fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-full shadow-xl border border-white/20 animate-in fade-in slide-in-from-top-4 duration-200';
+  toast.innerText = message;
+
+  document.body.appendChild(toast);
+  setTimeout(() => {
+    toast.remove();
+  }, 3500);
 }
