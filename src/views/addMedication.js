@@ -31,6 +31,10 @@ export async function renderAddMedication(container, navigateTo, editId = null) 
   isEditing = !!editId;
   const savedMemos = await getVoiceMemos();
 
+  const currentHH = String(new Date().getHours()).padStart(2, '0');
+  const currentMM = String(new Date().getMinutes()).padStart(2, '0');
+  const nowTimeStr = `${currentHH}:${currentMM}`;
+
   if (editId) {
     const existing = await getMedication(editId);
     if (existing) {
@@ -56,6 +60,7 @@ export async function renderAddMedication(container, navigateTo, editId = null) 
         totalStock: isUnlim ? 'unlimited' : (existing.totalStock || 20),
         remainingStock: isUnlim ? 'unlimited' : (existing.remainingStock !== undefined ? existing.remainingStock : existing.totalStock || 20),
         startDate: existing.startDate || getTodayString(),
+        createdAtTime: existing.createdAtTime || nowTimeStr,
         voiceBlob: null,
         voiceDuration: 0,
         savedVoiceMemos: savedMemos || []
@@ -81,6 +86,7 @@ export async function renderAddMedication(container, navigateTo, editId = null) 
       totalStock: 20,
       remainingStock: 20,
       startDate: getTodayString(),
+      createdAtTime: nowTimeStr,
       voiceBlob: null,
       voiceDuration: 0,
       savedVoiceMemos: savedMemos || []
@@ -547,6 +553,7 @@ function attachStepEvents(container, navigateTo) {
           totalStock: isUnlim ? 'unlimited' : formData.totalStock,
           remainingStock: isUnlim ? 'unlimited' : formData.remainingStock,
           startDate: formData.startDate || getTodayString(),
+          createdAtTime: formData.createdAtTime || `${String(new Date().getHours()).padStart(2, '0')}:${String(new Date().getMinutes()).padStart(2, '0')}`,
           icon,
           colorBg,
           colorText
