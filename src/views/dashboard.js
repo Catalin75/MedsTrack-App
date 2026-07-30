@@ -1,4 +1,4 @@
-import { getMedications, getLogsForDate, toggleDoseLog, getTodayString, clearAllData, deleteMedication, saveMedication } from '../db.js';
+import { getMedications, getLogsForDate, getTodayString, toggleDoseLog, saveMedication, deleteMedication, clearAllData } from '../db.js';
 import { playNotificationSound } from '../audio.js';
 
 let selectedDate = getTodayString();
@@ -8,43 +8,42 @@ export async function renderDashboard(container, navigateTo) {
   const meds = await getMedications();
   const logs = await getLogsForDate(selectedDate);
 
-  // Group meds by time intervals for selected date
+  // Group medications by daily periods
   const scheduleItems = [];
+
   meds.forEach(med => {
+    // Check if treatment is active for selected date
+    if (med.startDate && med.durationDays) {
+      const start = new Date(med.startDate);
+      const sel = new Date(selectedDate);
+      const diffTime = sel.getTime() - start.getTime();
+      const diffDays = Math.floor(diffTime / (1000 * 3600 * 24));
+
+      if (diffDays < 0 || diffDays >= med.durationDays) {
+        return; // Skip if date is out of treatment range
+      }
+    }
+
     if (med.times && Array.isArray(med.times)) {
       med.times.forEach(timeStr => {
         const hour = parseInt(timeStr.split(':')[0], 10);
         let period = 'Dimineața';
-        let periodIcon = 'light_mode';
-        let periodColor = 'text-tertiary';
+        if (hour >= 12 && hour < 17) period = 'Prânz';
+        else if (hour >= 17) period = 'Seară';
 
-        if (hour >= 12 && hour < 17) {
-          period = 'Prânz';
-          periodIcon = 'sunny';
-          periodColor = 'text-secondary';
-        } else if (hour >= 17) {
-          period = 'Seară';
-          periodIcon = 'dark_mode';
-          periodColor = 'text-primary';
-        }
-
-        const log = logs.find(l => l.medicationId === med.id && l.scheduledTime === timeStr);
-        const isTaken = !!log;
+        const isTaken = logs.some(l => l.medicationId === med.id && l.scheduledTime === timeStr && l.taken);
 
         scheduleItems.push({
           med,
           timeStr,
           period,
-          periodIcon,
-          periodColor,
-          isTaken,
-          hour
+          isTaken
         });
       });
     }
   });
 
-  // Sort chronologically
+  // Sort by time
   scheduleItems.sort((a, b) => a.timeStr.localeCompare(b.timeStr));
 
   const dateList = generateDateScrollerList(selectedDate);
@@ -225,7 +224,9 @@ function openActionModal(container, med, navigateTo) {
         modal.classList.add('hidden');
         const added = prompt(`Câte doze dorești să adaugi la stocul de ${med.name}?`, '20');
         if (added && !isNaN(added)) {
-          med.remainingStock = (med.remainingStock || 0) + parseInt(added, 10);
+          const addVal = parseInt(added, 10);
+          const curStk = typeof med.remainingStock === 'number' ? med.remainingStock : parseInt(med.remainingStock || med.totalStock || '20', 10);
+          med.remainingStock = (isNaN(curStk) ? 20 : curStk) + addVal;
           await saveMedication(med);
           renderDashboard(container, navigateTo);
         }
@@ -294,9 +295,12 @@ function renderPeriodSection(periodTitle, iconName, colorClass, scheduleItems, d
                     <span class="material-symbols-outlined text-lg">more_vert</span>
                   </button>
                 </div>
-                <div class="flex items-center gap-2 mt-1">
+                <div class="flex items-center gap-2 mt-1 flex-wrap">
                   <span class="text-xs bg-surface-container-high px-2 py-0.5 rounded-md text-on-surface-variant font-medium">${item.med.dosageDisplay || '1 comprimat'}</span>
                   <span class="text-xs text-primary font-bold">${item.timeStr}</span>
+                  <span class="text-[11px] ${item.med.isUnlimited ? 'text-outline' : (typeof item.med.remainingStock === 'number' && item.med.remainingStock <= 5 ? 'text-error font-bold' : 'text-on-surface-variant')}">
+                    • Stoc: ${item.med.isUnlimited ? '∞' : (item.med.remainingStock !== undefined ? item.med.remainingStock : (item.med.totalStock || 20))} doze
+                  </span>
                 </div>
               </div>
             </div>
@@ -341,7 +345,6 @@ function generateDateScrollerList(currentDateStr) {
 function formatDisplayDate(dateStr) {
   const d = new Date(dateStr);
   const dayNames = ['Duminică', 'Luni', 'Marți', 'Miercuri', 'Joi', 'Vineri', 'Sâmbătă'];
-  const monthNames = ['Ianuarie', 'Februarie', 'Martie', 'Aprilie', 'Mai', 'Iunie', 'Iulie', 'August', 'Septembrie', 'Octombrie', 'Noiembrie', 'Decembrie'];
-
+  const monthNames = ['ianuarie', 'februarie', 'martie', 'aprilie', 'mai', 'iunie', 'iulie', 'august', 'septembrie', 'octombrie', 'noiembrie', 'decembrie'];
   return `${dayNames[d.getDay()]}, ${d.getDate()} ${monthNames[d.getMonth()]}`;
 }
