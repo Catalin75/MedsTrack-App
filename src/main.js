@@ -1,4 +1,5 @@
 import { initSeedData } from './db.js';
+import { initDoseScheduler } from './scheduler.js';
 import { renderDashboard } from './views/dashboard.js';
 import { renderAddMedication } from './views/addMedication.js';
 import { renderCabinet } from './views/cabinet.js';
@@ -6,9 +7,11 @@ import { renderNotifications } from './views/notifications.js';
 import { renderHistory } from './views/history.js';
 
 let currentView = 'dashboard';
+let currentParams = {};
 
 async function initApp() {
   await initSeedData();
+  initDoseScheduler();
 
   if ('serviceWorker' in navigator) {
     try {
@@ -17,6 +20,8 @@ async function initApp() {
       console.log('ServiceWorker note:', e.message);
     }
   }
+
+  window.refreshCurrentView = () => navigateTo(currentView, currentParams);
 
   setupNavigation();
   navigateTo('dashboard');
@@ -34,6 +39,7 @@ function setupNavigation() {
 
 export function navigateTo(viewName, params = {}) {
   currentView = viewName;
+  currentParams = params;
   const appContainer = document.getElementById('app');
   const bottomNav = document.getElementById('bottom-nav');
 
