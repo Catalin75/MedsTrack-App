@@ -93,7 +93,7 @@ function sendWebNotification(med, timeStr) {
 
   const title = ` Memento Medicament: ${med.name}`;
   const options = {
-    body: `Ora ${timeStr} - ${med.dosageDisplay || '1 doză'}\n${med.mealReminder ? 'Înainte de masă' : 'Tratament cronic'}`,
+    body: `Ora ${timeStr} - ${med.dosageDisplay || '1 doză'}`,
     icon: '/manifest.json',
     tag: `dose_${med.id}_${todayStringClean(timeStr)}`,
     renotify: true,
@@ -160,7 +160,6 @@ export function displayInAppDoseModal(med, timeStr) {
         </span>
         <h2 class="text-xl font-bold text-on-surface">${med.name}</h2>
         <p class="text-base font-bold text-primary mt-1">${med.dosageDisplay || '1 doză'}</p>
-        ${med.mealReminder ? '<p class="text-xs font-bold text-secondary mt-1"> Memento înainte de masă (30 min)</p>' : ''}
       </div>
 
       <div class="pt-2 flex flex-col gap-2.5">
