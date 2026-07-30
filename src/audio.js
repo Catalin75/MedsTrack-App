@@ -15,8 +15,20 @@ function getAudioContext() {
   return audioCtx;
 }
 
+// Get estimated duration per sound sequence in ms
+function getSoundDurationMs(soundName) {
+  switch (soundName) {
+    case 'bell': return 1400;
+    case 'vital': return 700;
+    case 'alert': return 900;
+    case 'zen': return 2200;
+    case 'echo': return 750;
+    default: return 1200;
+  }
+}
+
 // Synthesize notification tones using Web Audio API or play custom recorded voice memo
-export async function playNotificationSound(soundName = 'bell', volumePercent = 75) {
+export async function playNotificationSound(soundName = 'bell', volumePercent = 75, repeatCount = 3) {
   try {
     if (soundName && soundName.startsWith('voice_')) {
       const voiceId = soundName.replace('voice_', '');
@@ -24,7 +36,12 @@ export async function playNotificationSound(soundName = 'bell', volumePercent = 
         const { getVoiceMemo } = await import('./db.js');
         const memo = await getVoiceMemo(voiceId);
         if (memo && memo.blob) {
-          await playAudioBlob(memo.blob);
+          for (let r = 0; r < repeatCount; r++) {
+            await playAudioBlob(memo.blob);
+            if (r < repeatCount - 1) {
+              await new Promise(resolve => setTimeout(resolve, 500));
+            }
+          }
           return;
         }
       } catch (err) {
@@ -33,78 +50,89 @@ export async function playNotificationSound(soundName = 'bell', volumePercent = 
       soundName = 'bell';
     }
 
-    const ctx = getAudioContext();
-    const gainNode = ctx.createGain();
-    const volume = (volumePercent / 100) * 0.3; // safe max volume
-    gainNode.gain.setValueAtTime(volume, ctx.currentTime);
-    gainNode.connect(ctx.destination);
+    const durationMs = getSoundDurationMs(soundName);
 
-    const now = ctx.currentTime;
-
-    if (soundName === 'bell') {
-      // Crystal Bell Chime (C5 -> E5 -> G5)
-      const notes = [523.25, 659.25, 783.99];
-      notes.forEach((freq, i) => {
-        const osc = ctx.createOscillator();
-        const noteGain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, now + i * 0.15);
-        noteGain.gain.setValueAtTime(volume, now + i * 0.15);
-        noteGain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.15 + 1.2);
-        osc.connect(noteGain);
-        noteGain.connect(ctx.destination);
-        osc.start(now + i * 0.15);
-        osc.stop(now + i * 0.15 + 1.2);
-      });
-    } else if (soundName === 'vital') {
-      // Pulse Vital (Double Beep)
-      [0, 0.15].forEach(t => {
-        const osc = ctx.createOscillator();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(587.33, now + t);
-        osc.connect(gainNode);
-        osc.start(now + t);
-        osc.stop(now + t + 0.08);
-      });
-    } else if (soundName === 'alert') {
-      // Urgent Medical Alert
-      [0, 0.12, 0.24, 0.36].forEach((t, i) => {
-        const osc = ctx.createOscillator();
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(i % 2 === 0 ? 880 : 1100, now + t);
-        osc.connect(gainNode);
-        osc.start(now + t);
-        osc.stop(now + t + 0.09);
-      });
-    } else if (soundName === 'zen') {
-      // Relaxing Zen Bowl
-      const osc = ctx.createOscillator();
-      const noteGain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(220, now); // A3
-      noteGain.gain.setValueAtTime(volume * 1.5, now);
-      noteGain.gain.exponentialRampToValueAtTime(0.0001, now + 2.5);
-      osc.connect(noteGain);
-      noteGain.connect(ctx.destination);
-      osc.start(now);
-      osc.stop(now + 2.5);
-    } else if (soundName === 'echo') {
-      // Digital Echo
-      [0, 0.1, 0.2].forEach((t, i) => {
-        const osc = ctx.createOscillator();
-        const noteGain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(1046.50 / (i + 1), now + t);
-        noteGain.gain.setValueAtTime(volume / (i + 1), now + t);
-        noteGain.gain.exponentialRampToValueAtTime(0.001, now + t + 0.3);
-        osc.connect(noteGain);
-        noteGain.connect(ctx.destination);
-        osc.start(now + t);
-        osc.stop(now + t + 0.3);
-      });
+    for (let r = 0; r < repeatCount; r++) {
+      playSingleToneSequence(soundName, volumePercent);
+      if (r < repeatCount - 1) {
+        await new Promise(resolve => setTimeout(resolve, durationMs));
+      }
     }
   } catch (err) {
     console.warn('Audio synthesis warning:', err);
+  }
+}
+
+function playSingleToneSequence(soundName, volumePercent) {
+  const ctx = getAudioContext();
+  const gainNode = ctx.createGain();
+  const volume = (volumePercent / 100) * 0.3; // safe max volume
+  gainNode.gain.setValueAtTime(volume, ctx.currentTime);
+  gainNode.connect(ctx.destination);
+
+  const now = ctx.currentTime;
+
+  if (soundName === 'bell') {
+    // Crystal Bell Chime (C5 -> E5 -> G5)
+    const notes = [523.25, 659.25, 783.99];
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const noteGain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + i * 0.15);
+      noteGain.gain.setValueAtTime(volume, now + i * 0.15);
+      noteGain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.15 + 1.2);
+      osc.connect(noteGain);
+      noteGain.connect(ctx.destination);
+      osc.start(now + i * 0.15);
+      osc.stop(now + i * 0.15 + 1.2);
+    });
+  } else if (soundName === 'vital') {
+    // Pulse Vital (Double Beep)
+    [0, 0.15].forEach(t => {
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(587.33, now + t);
+      osc.connect(gainNode);
+      osc.start(now + t);
+      osc.stop(now + t + 0.08);
+    });
+  } else if (soundName === 'alert') {
+    // Urgent Medical Alert
+    [0, 0.12, 0.24, 0.36].forEach((t, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(i % 2 === 0 ? 880 : 1100, now + t);
+      osc.connect(gainNode);
+      osc.start(now + t);
+      osc.stop(now + t + 0.09);
+    });
+  } else if (soundName === 'zen') {
+    // Relaxing Zen Bowl
+    const osc = ctx.createOscillator();
+    const noteGain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(220, now); // A3
+    noteGain.gain.setValueAtTime(volume * 1.5, now);
+    noteGain.gain.exponentialRampToValueAtTime(0.0001, now + 2.0);
+    osc.connect(noteGain);
+    noteGain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 2.0);
+  } else if (soundName === 'echo') {
+    // Digital Echo
+    [0, 0.1, 0.2].forEach((t, i) => {
+      const osc = ctx.createOscillator();
+      const noteGain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1046.50 / (i + 1), now + t);
+      noteGain.gain.setValueAtTime(volume / (i + 1), now + t);
+      noteGain.gain.exponentialRampToValueAtTime(0.001, now + t + 0.3);
+      osc.connect(noteGain);
+      noteGain.connect(ctx.destination);
+      osc.start(now + t);
+      osc.stop(now + t + 0.3);
+    });
   }
 }
 
