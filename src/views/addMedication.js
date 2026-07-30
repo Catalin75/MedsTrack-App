@@ -1,4 +1,4 @@
-import { saveMedication, getMedication, getTodayString, getVoiceMemos, saveVoiceMemo } from '../db.js';
+import { saveMedication, getMedication, getTodayString } from '../db.js';
 import { playNotificationSound, startRecording, stopRecording, playAudioBlob } from '../audio.js';
 
 let currentStep = 1;
@@ -11,36 +11,25 @@ let formData = {
   dosageValue: '1',
   dosageUnit: 'unitati',
   durationDays: 7,
-  isCustomDuration: false,
-  customDays: 65,
   dosesPerDay: 2,
   times: ['08:00', '20:00'],
-  mealReminder: true,
   criticalAlert: false,
   soundChoice: 'bell',
   isUnlimited: false,
   totalStock: 20,
   remainingStock: 20,
   voiceBlob: null,
-  voiceDuration: 0,
-  savedVoiceMemos: []
+  voiceDuration: 0
 };
 
 export async function renderAddMedication(container, navigateTo, editId = null) {
   currentStep = 1;
   isEditing = !!editId;
-  const savedMemos = await getVoiceMemos();
-
-  const currentHH = String(new Date().getHours()).padStart(2, '0');
-  const currentMM = String(new Date().getMinutes()).padStart(2, '0');
-  const nowTimeStr = `${currentHH}:${currentMM}`;
 
   if (editId) {
     const existing = await getMedication(editId);
     if (existing) {
       const isUnlim = existing.isUnlimited || existing.totalStock === 'unlimited';
-      const dur = existing.durationDays || 7;
-      const isCustom = dur !== 7 && dur !== 30;
       formData = {
         id: existing.id,
         treatmentCategory: existing.treatmentCategory || '',
@@ -48,22 +37,17 @@ export async function renderAddMedication(container, navigateTo, editId = null) 
         form: existing.form || 'capsule',
         dosageValue: existing.dosageValue || '1',
         dosageUnit: existing.dosageUnit || 'unitati',
-        durationDays: dur,
-        isCustomDuration: isCustom,
-        customDays: isCustom ? dur : 65,
+        durationDays: existing.durationDays || 7,
         dosesPerDay: existing.dosesPerDay || (existing.times ? existing.times.length : 2),
         times: existing.times || ['08:00', '20:00'],
-        mealReminder: existing.mealReminder !== undefined ? existing.mealReminder : true,
         criticalAlert: existing.criticalAlert || false,
         soundChoice: existing.soundChoice || 'bell',
         isUnlimited: isUnlim,
         totalStock: isUnlim ? 'unlimited' : (existing.totalStock || 20),
         remainingStock: isUnlim ? 'unlimited' : (existing.remainingStock !== undefined ? existing.remainingStock : existing.totalStock || 20),
         startDate: existing.startDate || getTodayString(),
-        createdAtTime: existing.createdAtTime || nowTimeStr,
         voiceBlob: null,
-        voiceDuration: 0,
-        savedVoiceMemos: savedMemos || []
+        voiceDuration: 0
       };
     }
   } else {
@@ -75,21 +59,16 @@ export async function renderAddMedication(container, navigateTo, editId = null) 
       dosageValue: '1',
       dosageUnit: 'unitati',
       durationDays: 7,
-      isCustomDuration: false,
-      customDays: 65,
       dosesPerDay: 2,
       times: ['08:00', '20:00'],
-      mealReminder: true,
       criticalAlert: false,
       soundChoice: 'bell',
       isUnlimited: false,
       totalStock: 20,
       remainingStock: 20,
       startDate: getTodayString(),
-      createdAtTime: nowTimeStr,
       voiceBlob: null,
-      voiceDuration: 0,
-      savedVoiceMemos: savedMemos || []
+      voiceDuration: 0
     };
   }
 
@@ -226,45 +205,24 @@ function renderStep1() {
 }
 
 function renderStep2() {
-  const isCustom = formData.isCustomDuration || (formData.durationDays !== 7 && formData.durationDays !== 30);
-  const customDaysVal = formData.isCustomDuration 
-    ? formData.durationDays 
-    : (formData.durationDays !== 7 && formData.durationDays !== 30 ? formData.durationDays : (formData.customDays || 65));
-
   return `
     <div class="space-y-5">
       <!-- Duration Section -->
       <div class="bg-surface-container-lowest p-4 rounded-2xl border border-outline-variant/40 shadow-sm space-y-3">
         <label class="text-xs font-bold text-primary uppercase tracking-wider block">Durata tratamentului</label>
         <div class="grid grid-cols-3 gap-2">
-          <button type="button" data-duration="7" class="btn-duration flex flex-col items-center justify-center p-3 border-2 ${!isCustom && formData.durationDays === 7 ? 'border-primary bg-primary-fixed/20 text-primary' : 'border-outline-variant text-on-surface'} rounded-2xl active:scale-95 transition-all">
+          <button type="button" data-duration="7" class="btn-duration flex flex-col items-center justify-center p-3 border-2 ${formData.durationDays === 7 ? 'border-primary bg-primary-fixed/20 text-primary' : 'border-outline-variant text-on-surface'} rounded-2xl active:scale-95 transition-all">
             <span class="text-lg font-bold">7</span>
             <span class="text-xs">Zile</span>
           </button>
-          <button type="button" data-duration="30" class="btn-duration flex flex-col items-center justify-center p-3 border-2 ${!isCustom && formData.durationDays === 30 ? 'border-primary bg-primary-fixed/20 text-primary' : 'border-outline-variant text-on-surface'} rounded-2xl active:scale-95 transition-all">
+          <button type="button" data-duration="30" class="btn-duration flex flex-col items-center justify-center p-3 border-2 ${formData.durationDays === 30 ? 'border-primary bg-primary-fixed/20 text-primary' : 'border-outline-variant text-on-surface'} rounded-2xl active:scale-95 transition-all">
             <span class="text-lg font-bold">1</span>
             <span class="text-xs">Lună</span>
           </button>
-          <button type="button" data-duration="custom" class="btn-duration flex flex-col items-center justify-center p-3 border-2 ${isCustom ? 'border-primary bg-primary-fixed/20 text-primary' : 'border-outline-variant text-on-surface'} rounded-2xl active:scale-95 transition-all">
-            <span class="material-symbols-outlined text-xl">edit_calendar</span>
-            <span class="text-xs font-bold">Personalizat</span>
+          <button type="button" data-duration="365" class="btn-duration flex flex-col items-center justify-center p-3 border-2 ${formData.durationDays === 365 ? 'border-primary bg-primary-fixed/20 text-primary' : 'border-outline-variant text-on-surface'} rounded-2xl active:scale-95 transition-all">
+            <span class="material-symbols-outlined">all_inclusive</span>
+            <span class="text-xs">Permanent</span>
           </button>
-        </div>
-
-        <!-- Custom Duration Input Section -->
-        <div id="custom-duration-wrapper" class="${isCustom ? 'block' : 'hidden'} pt-2">
-          <div class="p-3.5 bg-surface-container-low rounded-xl border border-outline-variant/40 space-y-2">
-            <label for="input_custom_days" class="text-xs font-bold text-on-surface flex items-center gap-1.5">
-              <span class="material-symbols-outlined text-primary text-base">calendar_today</span>
-              <span>Introduceți numărul de zile dorit:</span>
-            </label>
-            <div class="flex items-center gap-2">
-              <input id="input_custom_days" type="number" min="1" max="1000" value="${customDaysVal}" placeholder="Ex: 65"
-                class="w-full h-11 px-3.5 bg-surface-container-lowest border border-outline-variant rounded-xl text-base font-bold text-primary focus:border-primary outline-none" />
-              <span class="text-xs font-bold text-on-surface-variant pr-2">Zile</span>
-            </div>
-            <p class="text-[11px] text-on-surface-variant">Tratamentul va fi programat pentru <strong id="disp-custom-days" class="text-primary font-bold">${customDaysVal}</strong> zile.</p>
-          </div>
         </div>
       </div>
 
@@ -279,58 +237,18 @@ function renderStep2() {
           </div>
         </div>
 
-        <!-- Dynamic 24-Hour Time Pickers (00:00 - 23:59) -->
+        <!-- Dynamic Time Pickers -->
         <div id="times-picker-container" class="space-y-2.5 pt-2">
-          ${formData.times.map((t, idx) => {
-            const parts = (t || '08:00').split(':');
-            const curH = parts[0] ? parts[0].padStart(2, '0') : '08';
-            const curM = parts[1] ? parts[1].padStart(2, '0') : '00';
-
-            const hourOptions = Array.from({length: 24}, (_, h) => {
-              const hh = String(h).padStart(2, '0');
-              return `<option value="${hh}" ${curH === hh ? 'selected' : ''}>${hh}</option>`;
-            }).join('');
-
-            const minuteOptions = Array.from({length: 60}, (_, m) => {
-              const mm = String(m).padStart(2, '0');
-              return `<option value="${mm}" ${curM === mm ? 'selected' : ''}>${mm}</option>`;
-            }).join('');
-
-            return `
-              <div class="flex items-center justify-between p-3 bg-surface-container-low rounded-xl border border-outline-variant/30">
-                <div class="flex items-center gap-3">
-                  <span class="material-symbols-outlined text-primary">schedule</span>
-                  <span class="text-sm font-semibold text-on-surface">Doză ${idx + 1}</span>
-                </div>
-                <div class="flex items-center gap-1 bg-surface-container-lowest border border-outline-variant/60 rounded-xl px-3 py-1.5 shadow-sm">
-                  <select data-time-index="${idx}" data-time-part="hour" class="time-select-part bg-transparent text-base font-bold text-primary focus:outline-none cursor-pointer">
-                    ${hourOptions}
-                  </select>
-                  <span class="font-bold text-primary text-base select-none">:</span>
-                  <select data-time-index="${idx}" data-time-part="minute" class="time-select-part bg-transparent text-base font-bold text-primary focus:outline-none cursor-pointer">
-                    ${minuteOptions}
-                  </select>
-                  <span class="text-xs font-semibold text-on-surface-variant ml-1">ora</span>
-                </div>
+          ${formData.times.map((t, idx) => `
+            <div class="flex items-center justify-between p-3 bg-surface-container-low rounded-xl border border-outline-variant/30">
+              <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-primary">schedule</span>
+                <span class="text-sm font-semibold text-on-surface">Doză ${idx + 1}</span>
               </div>
-            `;
-          }).join('')}
+              <input type="time" data-time-index="${idx}" value="${t}" class="time-input bg-transparent border-none text-base font-bold text-primary focus:ring-0 cursor-pointer" />
+            </div>
+          `).join('')}
         </div>
-      </div>
-
-      <!-- Meal Switch -->
-      <div class="bg-surface-container-lowest p-4 rounded-2xl border border-outline-variant/40 shadow-sm flex justify-between items-center">
-        <div class="space-y-0.5">
-          <div class="flex items-center gap-2">
-            <span class="material-symbols-outlined text-secondary">restaurant</span>
-            <span class="text-sm font-bold text-on-surface">Memento înainte de masă</span>
-          </div>
-          <p class="text-xs text-on-surface-variant">Alertă cu 30 minute înainte de masă.</p>
-        </div>
-        <label class="relative inline-flex items-center cursor-pointer">
-          <input type="checkbox" id="chk-meal" ${formData.mealReminder ? 'checked' : ''} class="sr-only peer" />
-          <div class="w-12 h-6 bg-surface-container-highest rounded-full peer-checked:bg-primary transition-all relative after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-6"></div>
-        </label>
       </div>
     </div>
   `;
@@ -365,33 +283,6 @@ function renderStep3() {
               <input type="radio" name="sound_choice" value="${s.id}" ${formData.soundChoice === s.id ? 'checked' : ''} class="w-5 h-5 text-primary" />
             </label>
           `).join('')}
-
-          ${formData.savedVoiceMemos && formData.savedVoiceMemos.length > 0 ? `
-            <div class="pt-2 space-y-2">
-              <label class="text-xs font-bold text-tertiary uppercase tracking-wider px-1 block flex items-center gap-1.5">
-                <span class="material-symbols-outlined text-base">mic</span>
-                <span>Mementouri Vocale Înregistrate</span>
-              </label>
-              ${formData.savedVoiceMemos.map(vm => {
-                const vKey = `voice_${vm.id}`;
-                const isSel = formData.soundChoice === vKey;
-                return `
-                  <label class="flex items-center justify-between bg-surface-container-lowest p-3.5 rounded-2xl border-2 ${isSel ? 'border-primary bg-primary-fixed/10' : 'border-outline-variant/30'} cursor-pointer transition-all">
-                    <div class="flex items-center gap-3">
-                      <button type="button" data-sound="${vKey}" class="btn-preview-sound w-9 h-9 flex items-center justify-center bg-tertiary-fixed rounded-full text-tertiary hover:scale-105 active:scale-95 transition-all">
-                        <span class="material-symbols-outlined text-xl">play_arrow</span>
-                      </button>
-                      <div>
-                        <p class="text-sm font-bold text-on-surface">🎙️ Memento Vocal #${vm.id}</p>
-                        <p class="text-xs text-on-surface-variant">Durată: ${vm.durationSeconds || 5}s</p>
-                      </div>
-                    </div>
-                    <input type="radio" name="sound_choice" value="${vKey}" ${isSel ? 'checked' : ''} class="w-5 h-5 text-primary" />
-                  </label>
-                `;
-              }).join('')}
-            </div>
-          ` : ''}
         </div>
       </div>
 
@@ -495,19 +386,6 @@ function attachStepEvents(container, navigateTo) {
         currentStep = 2;
         renderWizardStep(container, navigateTo);
       } else if (currentStep === 2) {
-        if (formData.isCustomDuration) {
-          const customDaysInput = container.querySelector('#input_custom_days');
-          if (customDaysInput) {
-            const parsedVal = parseInt(customDaysInput.value, 10);
-            if (!isNaN(parsedVal) && parsedVal > 0) {
-              formData.durationDays = parsedVal;
-              formData.customDays = parsedVal;
-            } else {
-              alert('Te rugăm să introduci un număr valid de zile pentru perioada personalizată!');
-              return;
-            }
-          }
-        }
         currentStep = 3;
         renderWizardStep(container, navigateTo);
       } else if (currentStep === 3) {
@@ -546,14 +424,12 @@ function attachStepEvents(container, navigateTo) {
           durationDays: formData.durationDays,
           dosesPerDay: formData.dosesPerDay,
           times: formData.times,
-          mealReminder: formData.mealReminder,
           criticalAlert: formData.criticalAlert,
           soundChoice: formData.soundChoice,
           isUnlimited: isUnlim,
           totalStock: isUnlim ? 'unlimited' : formData.totalStock,
           remainingStock: isUnlim ? 'unlimited' : formData.remainingStock,
           startDate: formData.startDate || getTodayString(),
-          createdAtTime: formData.createdAtTime || `${String(new Date().getHours()).padStart(2, '0')}:${String(new Date().getMinutes()).padStart(2, '0')}`,
           icon,
           colorBg,
           colorText
@@ -599,38 +475,12 @@ function attachStepEvents(container, navigateTo) {
 
   // Step 2 Listeners
   if (currentStep === 2) {
-    const customDaysInput = container.querySelector('#input_custom_days');
-    const dispCustomDays = container.querySelector('#disp-custom-days');
-
     container.querySelectorAll('.btn-duration').forEach(btn => {
       btn.addEventListener('click', () => {
-        const durAttr = btn.getAttribute('data-duration');
-        if (durAttr === 'custom') {
-          formData.isCustomDuration = true;
-          const currentTyped = customDaysInput ? parseInt(customDaysInput.value, 10) : 65;
-          const validVal = !isNaN(currentTyped) && currentTyped > 0 ? currentTyped : 65;
-          formData.durationDays = validVal;
-          formData.customDays = validVal;
-        } else {
-          formData.isCustomDuration = false;
-          formData.durationDays = Number(durAttr);
-        }
+        formData.durationDays = Number(btn.getAttribute('data-duration'));
         renderWizardStep(container, navigateTo);
       });
     });
-
-    if (customDaysInput) {
-      customDaysInput.addEventListener('input', (e) => {
-        const val = parseInt(e.target.value, 10);
-        if (!isNaN(val) && val > 0) {
-          formData.durationDays = val;
-          formData.customDays = val;
-          if (dispCustomDays) {
-            dispCustomDays.innerText = val;
-          }
-        }
-      });
-    }
 
     const btnInc = container.querySelector('#btn-inc-doses');
     const btnDec = container.querySelector('#btn-dec-doses');
@@ -655,26 +505,12 @@ function attachStepEvents(container, navigateTo) {
       });
     }
 
-    container.querySelectorAll('.time-select-part').forEach(select => {
-      select.addEventListener('change', (e) => {
+    container.querySelectorAll('.time-input').forEach(input => {
+      input.addEventListener('change', (e) => {
         const idx = Number(e.target.getAttribute('data-time-index'));
-        const parentDiv = e.target.parentElement;
-        if (parentDiv) {
-          const hSel = parentDiv.querySelector('[data-time-part="hour"]');
-          const mSel = parentDiv.querySelector('[data-time-part="minute"]');
-          if (hSel && mSel) {
-            formData.times[idx] = `${hSel.value}:${mSel.value}`;
-          }
-        }
+        formData.times[idx] = e.target.value;
       });
     });
-
-    const chkMeal = container.querySelector('#chk-meal');
-    if (chkMeal) {
-      chkMeal.addEventListener('change', (e) => {
-        formData.mealReminder = e.target.checked;
-      });
-    }
   }
 
   // Step 3 Listeners
@@ -720,10 +556,6 @@ function attachStepEvents(container, navigateTo) {
           if (res) {
             formData.voiceBlob = res.blob;
             formData.voiceDuration = res.durationSeconds;
-            const memoId = await saveVoiceMemo(res.blob, res.durationSeconds);
-            formData.voiceMemoId = memoId;
-            formData.soundChoice = `voice_${memoId}`;
-            formData.savedVoiceMemos = await getVoiceMemos();
           }
           renderWizardStep(container, navigateTo);
         }
