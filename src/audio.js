@@ -15,9 +15,24 @@ function getAudioContext() {
   return audioCtx;
 }
 
-// Synthesize notification tones using Web Audio API
-export function playNotificationSound(soundName = 'bell', volumePercent = 75) {
+// Synthesize notification tones using Web Audio API or play custom recorded voice memo
+export async function playNotificationSound(soundName = 'bell', volumePercent = 75) {
   try {
+    if (soundName && soundName.startsWith('voice_')) {
+      const voiceId = soundName.replace('voice_', '');
+      try {
+        const { getVoiceMemo } = await import('./db.js');
+        const memo = await getVoiceMemo(voiceId);
+        if (memo && memo.blob) {
+          await playAudioBlob(memo.blob);
+          return;
+        }
+      } catch (err) {
+        console.warn('Voice memo playback note:', err);
+      }
+      soundName = 'bell';
+    }
+
     const ctx = getAudioContext();
     const gainNode = ctx.createGain();
     const volume = (volumePercent / 100) * 0.3; // safe max volume
