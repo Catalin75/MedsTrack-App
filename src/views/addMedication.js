@@ -7,10 +7,9 @@ let formData = {
   id: null,
   treatmentCategory: '',
   name: '',
-  form: 'capsule',
-  dosageValue: '1',
-  dosageUnit: 'unitati',
+  medications: [],
   durationDays: 7,
+  isCustomDuration: false,
   dosesPerDay: 2,
   times: ['08:00', '20:00'],
   criticalAlert: false,
@@ -30,14 +29,29 @@ export async function renderAddMedication(container, navigateTo, editId = null) 
     const existing = await getMedication(editId);
     if (existing) {
       const isUnlim = existing.isUnlimited || existing.totalStock === 'unlimited';
+      
+      const loadedMeds = (existing.medications && Array.isArray(existing.medications) && existing.medications.length > 0)
+        ? existing.medications
+        : [
+            {
+              id: 'med_1',
+              name: existing.name || '',
+              form: existing.form || 'capsule',
+              dosageValue: existing.dosageValue || '1',
+              dosageUnit: existing.dosageUnit || 'unitati',
+              isUnlimited: isUnlim,
+              totalStock: isUnlim ? 'unlimited' : (existing.totalStock || 20),
+              remainingStock: isUnlim ? 'unlimited' : (existing.remainingStock !== undefined ? existing.remainingStock : existing.totalStock || 20)
+            }
+          ];
+
       formData = {
         id: existing.id,
         treatmentCategory: existing.treatmentCategory || '',
-        name: existing.name || '',
-        form: existing.form || 'capsule',
-        dosageValue: existing.dosageValue || '1',
-        dosageUnit: existing.dosageUnit || 'unitati',
+        name: existing.name || loadedMeds[0].name || '',
+        medications: loadedMeds,
         durationDays: existing.durationDays || 7,
+        isCustomDuration: existing.durationDays !== 7 && existing.durationDays !== 30,
         dosesPerDay: existing.dosesPerDay || (existing.times ? existing.times.length : 2),
         times: existing.times || ['08:00', '20:00'],
         criticalAlert: existing.criticalAlert || false,
@@ -55,10 +69,20 @@ export async function renderAddMedication(container, navigateTo, editId = null) 
       id: null,
       treatmentCategory: '',
       name: '',
-      form: 'capsule',
-      dosageValue: '1',
-      dosageUnit: 'unitati',
+      medications: [
+        {
+          id: 'med_1',
+          name: '',
+          form: 'capsule',
+          dosageValue: '1',
+          dosageUnit: 'unitati',
+          isUnlimited: false,
+          totalStock: 20,
+          remainingStock: 20
+        }
+      ],
       durationDays: 7,
+      isCustomDuration: false,
       dosesPerDay: 2,
       times: ['08:00', '20:00'],
       criticalAlert: false,
@@ -100,7 +124,7 @@ function renderWizardStep(container, navigateTo) {
       <div class="mb-5">
         <p class="text-xs font-bold text-outline uppercase tracking-wider">Pasul ${currentStep} din 3</p>
         <p class="text-sm text-on-surface-variant mt-0.5">
-          ${currentStep === 1 ? 'Definiți denumirea tratamentului, stocul și doza medicamentului.' : ''}
+          ${currentStep === 1 ? 'Definiți denumirea tratamentului și pastilele incluse.' : ''}
           ${currentStep === 2 ? 'Ajustați orele de administrare și durata tratamentului.' : ''}
           ${currentStep === 3 ? 'Actualizați sunetul, notificările și mesajul vocal.' : ''}
         </p>
@@ -132,73 +156,104 @@ function renderWizardStep(container, navigateTo) {
 
 function renderStep1() {
   return `
-    <div class="space-y-4">
+    <div class="space-y-5">
       <!-- Category / Treatment Name -->
       <div class="space-y-1">
-        <label for="treatment_category" class="text-xs font-bold text-on-surface ml-1">Nume Tratament / Diagnostic (Opțional)</label>
-        <input id="treatment_category" type="text" value="${formData.treatmentCategory}" placeholder="Ex: Gripă, Hepatită, Tensiune, Tratament 1..."
-          class="w-full h-13 px-4 bg-surface-container-lowest border border-outline-variant rounded-2xl text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all" />
-        <p class="text-[11px] text-outline px-1">Puteți grupa medicamentele pe tratamente (ex: Gripă, Tensiune).</p>
+        <label for="treatment_category" class="text-xs font-bold text-on-surface ml-1">Nume Tratament / Diagnostic *</label>
+        <input id="treatment_category" type="text" value="${formData.treatmentCategory}" placeholder="Ex: Tratament Gripă, Cardio, Tratament 1..."
+          class="w-full h-13 px-4 bg-surface-container-lowest border border-outline-variant rounded-2xl text-sm font-semibold focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all" />
       </div>
 
-      <!-- Medication Name Free Input -->
-      <div class="space-y-1">
-        <label for="med_name" class="text-xs font-bold text-on-surface ml-1">Denumire Medicament / Sirop *</label>
-        <input id="med_name" type="text" value="${formData.name}" placeholder="Introduceți orice denumire (ex: Sirop tuse, Comprimat A...)"
-          class="w-full h-14 px-4 bg-surface-container-lowest border border-outline-variant rounded-2xl text-base font-semibold focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all" />
-      </div>
+      <!-- Dynamic List of Medications in this Treatment -->
+      <div class="space-y-4">
+        <div class="flex items-center justify-between px-1">
+          <h2 class="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1">
+            <span class="material-symbols-outlined text-sm">pill</span>
+            <span>Medicamente incluse în acest tratament (${formData.medications.length})</span>
+          </h2>
+        </div>
 
-      <!-- Form Selection Grid -->
-      <div class="space-y-1.5 pt-1">
-        <label class="text-xs font-bold text-on-surface ml-1">Forma farmaceutică</label>
-        <div class="grid grid-cols-2 gap-3">
-          ${[
-            { id: 'capsule', label: 'Capsulă', icon: 'pill' },
-            { id: 'tablet', label: 'Comprimat', icon: 'medication' },
-            { id: 'liquid', label: 'Lichid / Sirop', icon: 'vaccines' },
-            { id: 'injection', label: 'Injecție', icon: 'syringe' }
-          ].map(item => `
-            <label class="cursor-pointer group">
-              <input type="radio" name="form_choice" value="${item.id}" ${formData.form === item.id ? 'checked' : ''} class="peer sr-only" />
-              <div class="flex flex-col items-center justify-center p-3.5 rounded-2xl bg-surface-container-lowest border-2 border-outline-variant peer-checked:border-primary peer-checked:bg-primary-fixed/30 hover:bg-surface-container-low transition-all h-26">
-                <span class="material-symbols-outlined text-3xl text-on-surface-variant group-hover:scale-110 transition-transform mb-1">${item.icon}</span>
-                <span class="text-xs font-bold text-on-surface">${item.label}</span>
+        ${formData.medications.map((medItem, idx) => `
+          <div class="med-item-card bg-surface-container-lowest p-4 rounded-3xl border-2 border-outline-variant/40 shadow-sm space-y-3 relative" data-med-index="${idx}">
+            <div class="flex items-center justify-between border-b border-outline-variant/20 pb-2">
+              <span class="text-xs font-extrabold text-primary uppercase">Medicamentul #${idx + 1}</span>
+              ${formData.medications.length > 1 ? `
+                <button type="button" data-remove-index="${idx}" class="btn-remove-med text-error hover:text-error text-xs font-bold flex items-center gap-0.5">
+                  <span class="material-symbols-outlined text-sm">delete</span>
+                  <span>Șterge</span>
+                </button>
+              ` : ''}
+            </div>
+
+            <!-- Name -->
+            <div class="space-y-1">
+              <label class="text-xs font-bold text-on-surface ml-1">Denumire Medicament / Sirop *</label>
+              <input type="text" data-med-field="name" data-med-index="${idx}" value="${medItem.name}" placeholder="Ex: Amoxicilină 500mg, Paracetamol..."
+                class="input-med-field w-full h-12 px-4 bg-background border border-outline-variant rounded-xl text-sm font-bold focus:border-primary outline-none" />
+            </div>
+
+            <!-- Form Selection Grid -->
+            <div class="space-y-1">
+              <label class="text-xs font-bold text-on-surface ml-1">Forma farmaceutică</label>
+              <div class="grid grid-cols-2 gap-2">
+                ${[
+                  { id: 'capsule', label: 'Capsulă', icon: 'pill' },
+                  { id: 'tablet', label: 'Comprimat', icon: 'medication' },
+                  { id: 'liquid', label: 'Lichid / Sirop', icon: 'vaccines' },
+                  { id: 'injection', label: 'Injecție', icon: 'syringe' }
+                ].map(item => `
+                  <label class="cursor-pointer">
+                    <input type="radio" name="form_choice_${idx}" value="${item.id}" ${medItem.form === item.id ? 'checked' : ''} data-med-index="${idx}" class="radio-med-form sr-only peer" />
+                    <div class="flex items-center gap-2 p-2.5 rounded-xl bg-background border border-outline-variant peer-checked:border-primary peer-checked:bg-primary-fixed/20 transition-all">
+                      <span class="material-symbols-outlined text-xl text-primary">${item.icon}</span>
+                      <span class="text-xs font-bold text-on-surface">${item.label}</span>
+                    </div>
+                  </label>
+                `).join('')}
               </div>
-            </label>
-          `).join('')}
-        </div>
-      </div>
+            </div>
 
-      <!-- Dosage & Unit -->
-      <div class="grid grid-cols-2 gap-3">
-        <div class="space-y-1">
-          <label for="dosage_val" class="text-xs font-bold text-on-surface ml-1">Cantitate per doză</label>
-          <input id="dosage_val" type="number" min="1" value="${formData.dosageValue}"
-            class="w-full h-13 px-4 bg-surface-container-lowest border border-outline-variant rounded-2xl text-center text-base font-bold focus:border-primary outline-none" />
-        </div>
-        <div class="space-y-1">
-          <label for="dosage_unit" class="text-xs font-bold text-on-surface ml-1">Unitate</label>
-          <select id="dosage_unit" class="w-full h-13 px-3 bg-surface-container-lowest border border-outline-variant rounded-2xl text-xs font-semibold focus:border-primary outline-none">
-            <option value="unitati" ${formData.dosageUnit === 'unitati' ? 'selected' : ''}>Pastilă/Doză</option>
-            <option value="mg" ${formData.dosageUnit === 'mg' ? 'selected' : ''}>Miligrame (mg)</option>
-            <option value="ml" ${formData.dosageUnit === 'ml' ? 'selected' : ''}>Mililitri (ml)</option>
-            <option value="drops" ${formData.dosageUnit === 'drops' ? 'selected' : ''}>Picături</option>
-          </select>
-        </div>
-      </div>
+            <!-- Dosage & Unit -->
+            <div class="grid grid-cols-2 gap-2">
+              <div class="space-y-1">
+                <label class="text-xs font-bold text-on-surface ml-1">Cantitate / Doză</label>
+                <input type="number" min="1" data-med-field="dosageValue" data-med-index="${idx}" value="${medItem.dosageValue || '1'}"
+                  class="input-med-field w-full h-11 px-3 bg-background border border-outline-variant rounded-xl text-center text-sm font-bold focus:border-primary outline-none" />
+              </div>
+              <div class="space-y-1">
+                <label class="text-xs font-bold text-on-surface ml-1">Unitate</label>
+                <select data-med-field="dosageUnit" data-med-index="${idx}" class="select-med-field w-full h-11 px-2 bg-background border border-outline-variant rounded-xl text-xs font-bold focus:border-primary outline-none">
+                  <option value="unitati" ${medItem.dosageUnit === 'unitati' ? 'selected' : ''}>Pastilă/Doză</option>
+                  <option value="mg" ${medItem.dosageUnit === 'mg' ? 'selected' : ''}>Miligrame (mg)</option>
+                  <option value="ml" ${medItem.dosageUnit === 'ml' ? 'selected' : ''}>Mililitri (ml)</option>
+                  <option value="drops" ${medItem.dosageUnit === 'drops' ? 'selected' : ''}>Picături</option>
+                </select>
+              </div>
+            </div>
 
-      <!-- Stock Input & Unlimited Checkbox -->
-      <div class="bg-surface-container-lowest p-3.5 rounded-2xl border border-outline-variant/40 shadow-sm space-y-2">
-        <div class="flex justify-between items-center">
-          <label for="total_stock" class="text-xs font-bold text-on-surface">Stoc disponibil inițial (doze)</label>
-          <label class="inline-flex items-center gap-1.5 cursor-pointer text-xs text-primary font-bold">
-            <input type="checkbox" id="chk_unlimited_stock" ${formData.isUnlimited ? 'checked' : ''} class="w-4 h-4 text-primary rounded" />
-            <span>Stoc Nelimitat (∞)</span>
-          </label>
-        </div>
+            <!-- Stock Input & Unlimited Checkbox -->
+            <div class="bg-background p-3 rounded-xl border border-outline-variant/30 space-y-2">
+              <div class="flex justify-between items-center">
+                <label class="text-xs font-bold text-on-surface">Stoc disponibil (doze)</label>
+                <label class="inline-flex items-center gap-1 cursor-pointer text-xs text-primary font-bold">
+                  <input type="checkbox" data-med-index="${idx}" ${medItem.isUnlimited ? 'checked' : ''} class="chk-med-unlimited w-4 h-4 text-primary rounded" />
+                  <span>Stoc Nelimitat (∞)</span>
+                </label>
+              </div>
 
-        <input id="total_stock" type="number" min="1" value="${formData.isUnlimited ? '' : (formData.totalStock !== 'unlimited' ? formData.totalStock : 20)}" ${formData.isUnlimited ? 'disabled placeholder="Stocul este nelimitat"' : 'placeholder="Ex: 30"'}
-          class="w-full h-12 px-4 bg-background border border-outline-variant rounded-xl text-sm font-semibold focus:border-primary outline-none disabled:opacity-50 disabled:bg-surface-container-low transition-all" />
+              ${!medItem.isUnlimited ? `
+                <input type="number" min="1" data-med-field="totalStock" data-med-index="${idx}" value="${typeof medItem.totalStock === 'number' ? medItem.totalStock : 20}" placeholder="Ex: 30"
+                  class="input-med-field w-full h-11 px-3 bg-surface-container-lowest border border-outline-variant rounded-xl text-sm font-bold focus:border-primary outline-none" />
+              ` : ''}
+            </div>
+          </div>
+        `).join('')}
+
+        <!-- Add Another Medication Button -->
+        <button type="button" id="btn-add-another-med" class="w-full py-3.5 bg-primary-fixed/30 text-primary border-2 border-dashed border-primary/40 rounded-2xl text-xs font-extrabold flex items-center justify-center gap-2 hover:bg-primary-fixed/60 active:scale-95 transition-all">
+          <span class="material-symbols-outlined text-lg">add_circle</span>
+          <span>+ Adaugă încă un medicament în acest tratament</span>
+        </button>
       </div>
     </div>
   `;
@@ -363,32 +418,27 @@ function attachStepEvents(container, navigateTo) {
   if (btnNext) {
     btnNext.addEventListener('click', async () => {
       if (currentStep === 1) {
-        const inputName = container.querySelector('#med_name');
         const inputCat = container.querySelector('#treatment_category');
-        const chkUnlim = container.querySelector('#chk_unlimited_stock');
-        const inputStock = container.querySelector('#total_stock');
+        if (inputCat) formData.treatmentCategory = inputCat.value.trim();
 
-        if (!inputName || !inputName.value.trim()) {
-          alert('Te rugăm să introduci denumirea medicamentului sau siropului!');
+        // Check medication items
+        if (!formData.medications || formData.medications.length === 0) {
+          alert('Vă rugăm să adăugați cel puțin un medicament în tratament.');
           return;
         }
 
-        formData.name = inputName.value.trim();
-        formData.treatmentCategory = inputCat ? inputCat.value.trim() : '';
-        formData.dosageValue = container.querySelector('#dosage_val').value || '1';
-        formData.dosageUnit = container.querySelector('#dosage_unit').value;
+        // Validate medication names
+        let valid = true;
+        formData.medications.forEach((m, i) => {
+          if (!m.name || !m.name.trim()) {
+            m.name = `Medicament ${i + 1}`;
+          }
+        });
 
-        formData.isUnlimited = chkUnlim ? chkUnlim.checked : false;
-        if (formData.isUnlimited) {
-          formData.totalStock = 'unlimited';
-          formData.remainingStock = 'unlimited';
-        } else {
-          const userTypedStock = parseInt(inputStock ? inputStock.value : '20', 10);
-          const validStock = isNaN(userTypedStock) || userTypedStock < 1 ? 20 : userTypedStock;
-          
-          formData.totalStock = validStock;
-          formData.remainingStock = validStock;
-        }
+        formData.name = formData.treatmentCategory || formData.medications[0].name;
+
+        // Sync global isUnlimited flag if all meds are unlimited
+        formData.isUnlimited = formData.medications.every(m => m.isUnlimited);
 
         currentStep = 2;
         renderWizardStep(container, navigateTo);
@@ -396,46 +446,55 @@ function attachStepEvents(container, navigateTo) {
         currentStep = 3;
         renderWizardStep(container, navigateTo);
       } else if (currentStep === 3) {
+        const firstMed = formData.medications[0] || {};
+        
         let formLabel = 'Comprimat';
         let icon = 'medication';
         let colorBg = 'bg-primary-fixed';
         let colorText = 'text-primary';
 
-        if (formData.form === 'capsule') {
+        if (firstMed.form === 'capsule') {
           formLabel = 'Capsulă';
           icon = 'pill';
           colorBg = 'bg-secondary-container';
           colorText = 'text-on-secondary-container';
-        } else if (formData.form === 'liquid') {
+        } else if (firstMed.form === 'liquid') {
           formLabel = 'Lichid / Sirop';
           icon = 'vaccines';
           colorBg = 'bg-tertiary-fixed';
           colorText = 'text-tertiary';
-        } else if (formData.form === 'injection') {
+        } else if (firstMed.form === 'injection') {
           formLabel = 'Injecție';
           icon = 'syringe';
           colorBg = 'bg-error-container';
           colorText = 'text-error';
         }
 
-        const isUnlim = formData.isUnlimited || formData.totalStock === 'unlimited';
+        const isUnlim = formData.medications.every(m => m.isUnlimited);
+
+        // Build dosage summary string
+        const dosageSummary = formData.medications.map(m => {
+          const unitLabel = m.dosageUnit === 'unitati' ? 'doze' : m.dosageUnit;
+          return `${m.name} (${m.dosageValue || 1} ${unitLabel})`;
+        }).join(' + ');
 
         const medToSave = {
-          name: formData.name,
+          name: formData.name || formData.treatmentCategory || 'Tratament',
           treatmentCategory: formData.treatmentCategory || 'General',
-          form: formData.form,
+          medications: formData.medications,
+          form: firstMed.form || 'capsule',
           formLabel,
-          dosageValue: formData.dosageValue,
-          dosageUnit: formData.dosageUnit,
-          dosageDisplay: `${formData.dosageValue} ${formData.dosageUnit === 'unitati' ? 'doze' : formData.dosageUnit}`,
+          dosageValue: firstMed.dosageValue || '1',
+          dosageUnit: firstMed.dosageUnit || 'unitati',
+          dosageDisplay: dosageSummary,
           durationDays: formData.durationDays,
           dosesPerDay: formData.dosesPerDay,
           times: formData.times,
           criticalAlert: formData.criticalAlert,
           soundChoice: formData.soundChoice,
           isUnlimited: isUnlim,
-          totalStock: isUnlim ? 'unlimited' : formData.totalStock,
-          remainingStock: isUnlim ? 'unlimited' : formData.remainingStock,
+          totalStock: isUnlim ? 'unlimited' : (formData.medications[0].totalStock || 20),
+          remainingStock: isUnlim ? 'unlimited' : (formData.medications[0].remainingStock !== undefined ? formData.medications[0].remainingStock : 20),
           startDate: formData.startDate || getTodayString(),
           icon,
           colorBg,
@@ -453,29 +512,91 @@ function attachStepEvents(container, navigateTo) {
     });
   }
 
-  // Step 1 Checkbox Listener for Unlimited Stock
+  // Step 1 Listeners
   if (currentStep === 1) {
-    const chkUnlim = container.querySelector('#chk_unlimited_stock');
-    const inputStock = container.querySelector('#total_stock');
-
-    if (chkUnlim && inputStock) {
-      chkUnlim.addEventListener('change', (e) => {
-        formData.isUnlimited = e.target.checked;
-        if (e.target.checked) {
-          inputStock.disabled = true;
-          inputStock.value = '';
-          inputStock.placeholder = 'Stocul este nelimitat';
-        } else {
-          inputStock.disabled = false;
-          inputStock.value = typeof formData.totalStock === 'number' ? formData.totalStock : 20;
-          inputStock.placeholder = 'Ex: 30';
-        }
+    const inputCat = container.querySelector('#treatment_category');
+    if (inputCat) {
+      inputCat.addEventListener('input', (e) => {
+        formData.treatmentCategory = e.target.value;
       });
     }
 
-    container.querySelectorAll('input[name="form_choice"]').forEach(radio => {
+    container.querySelectorAll('.input-med-field').forEach(input => {
+      input.addEventListener('input', (e) => {
+        const idx = Number(e.target.getAttribute('data-med-index'));
+        const field = e.target.getAttribute('data-med-field');
+        if (formData.medications[idx]) {
+          if (field === 'totalStock') {
+            const val = parseInt(e.target.value, 10);
+            formData.medications[idx].totalStock = isNaN(val) ? 20 : val;
+            formData.medications[idx].remainingStock = isNaN(val) ? 20 : val;
+          } else {
+            formData.medications[idx][field] = e.target.value;
+          }
+        }
+      });
+    });
+
+    container.querySelectorAll('.select-med-field').forEach(select => {
+      select.addEventListener('change', (e) => {
+        const idx = Number(e.target.getAttribute('data-med-index'));
+        const field = e.target.getAttribute('data-med-field');
+        if (formData.medications[idx]) {
+          formData.medications[idx][field] = e.target.value;
+        }
+      });
+    });
+
+    container.querySelectorAll('.radio-med-form').forEach(radio => {
       radio.addEventListener('change', (e) => {
-        formData.form = e.target.value;
+        const idx = Number(e.target.getAttribute('data-med-index'));
+        if (formData.medications[idx]) {
+          formData.medications[idx].form = e.target.value;
+        }
+      });
+    });
+
+    container.querySelectorAll('.chk-med-unlimited').forEach(chk => {
+      chk.addEventListener('change', (e) => {
+        const idx = Number(e.target.getAttribute('data-med-index'));
+        if (formData.medications[idx]) {
+          formData.medications[idx].isUnlimited = e.target.checked;
+          if (e.target.checked) {
+            formData.medications[idx].totalStock = 'unlimited';
+            formData.medications[idx].remainingStock = 'unlimited';
+          } else {
+            formData.medications[idx].totalStock = 20;
+            formData.medications[idx].remainingStock = 20;
+          }
+          renderWizardStep(container, navigateTo);
+        }
+      });
+    });
+
+    const btnAddAnother = container.querySelector('#btn-add-another-med');
+    if (btnAddAnother) {
+      btnAddAnother.addEventListener('click', () => {
+        formData.medications.push({
+          id: `med_${Date.now()}`,
+          name: '',
+          form: 'capsule',
+          dosageValue: '1',
+          dosageUnit: 'unitati',
+          isUnlimited: false,
+          totalStock: 20,
+          remainingStock: 20
+        });
+        renderWizardStep(container, navigateTo);
+      });
+    }
+
+    container.querySelectorAll('.btn-remove-med').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = Number(btn.getAttribute('data-remove-index'));
+        if (formData.medications.length > 1) {
+          formData.medications.splice(idx, 1);
+          renderWizardStep(container, navigateTo);
+        }
       });
     });
   }
@@ -542,8 +663,8 @@ function attachStepEvents(container, navigateTo) {
     container.querySelectorAll('.btn-preview-sound').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
-        const sName = btn.getAttribute('data-sound');
-        playNotificationSound(sName, 75);
+        const sId = btn.getAttribute('data-sound');
+        playNotificationSound(sId, 75);
       });
     });
 
@@ -553,43 +674,10 @@ function attachStepEvents(container, navigateTo) {
       });
     });
 
-    const chkCritical = container.querySelector('#chk-critical');
-    if (chkCritical) {
-      chkCritical.addEventListener('change', (e) => {
+    const chkCrit = container.querySelector('#chk-critical');
+    if (chkCrit) {
+      chkCrit.addEventListener('change', (e) => {
         formData.criticalAlert = e.target.checked;
-      });
-    }
-
-    let recording = false;
-    const btnRecord = container.querySelector('#btn-record-voice');
-    if (btnRecord) {
-      btnRecord.addEventListener('click', async () => {
-        if (!recording) {
-          try {
-            await startRecording();
-            recording = true;
-            btnRecord.querySelector('#rec-icon').innerText = 'stop';
-            btnRecord.querySelector('#rec-status-text').innerText = 'Se înregistrează... (Apasă STOP)';
-            btnRecord.classList.replace('bg-tertiary', 'bg-error');
-          } catch (err) {
-            alert('Eroare accesare microfon: ' + err.message);
-          }
-        } else {
-          const res = await stopRecording();
-          recording = false;
-          if (res) {
-            formData.voiceBlob = res.blob;
-            formData.voiceDuration = res.durationSeconds;
-          }
-          renderWizardStep(container, navigateTo);
-        }
-      });
-    }
-
-    const btnPlayVoice = container.querySelector('#btn-play-voice');
-    if (btnPlayVoice && formData.voiceBlob) {
-      btnPlayVoice.addEventListener('click', () => {
-        playAudioBlob(formData.voiceBlob);
       });
     }
   }
