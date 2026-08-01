@@ -2,6 +2,7 @@
 import { getMedications, getLogsForDate, getTodayString, recordDoseStatus, getMedication } from './db.js';
 import { playNotificationSound } from './audio.js';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import { App } from '@capacitor/app';
 
 let schedulerInterval = null;
 const notifiedDosesSet = new Set(); // Tracks format: `${medId}_${dateStr}_${timeStr}`
@@ -61,7 +62,7 @@ export async function scheduleNativeLocalNotifications() {
       ]
     }).catch(err => console.log('ActionTypes reg note:', err));
 
-    // 3. Attach Action Listener for Notification Buttons (Silent Background Execution)
+    // 3. Attach Action Listener for Notification Buttons (Silent Background Execution + Immediate Minimize)
     LocalNotifications.addListener('localNotificationActionPerformed', async (notificationAction) => {
       try {
         const actionId = notificationAction.actionId;
@@ -76,14 +77,14 @@ export async function scheduleNativeLocalNotifications() {
         notifiedDosesSet.add(key);
 
         const med = await getMedication(medId);
-        if (!med) return;
-
-        if (actionId === 'action_take') {
-          await recordDoseStatus(medId, timeStr, todayStr, 'taken');
-        } else if (actionId === 'action_snooze') {
-          snoozeDose(med, timeStr);
-        } else if (actionId === 'action_miss') {
-          await recordDoseStatus(medId, timeStr, todayStr, 'missed');
+        if (med) {
+          if (actionId === 'action_take') {
+            await recordDoseStatus(medId, timeStr, todayStr, 'taken');
+          } else if (actionId === 'action_snooze') {
+            snoozeDose(med, timeStr);
+          } else if (actionId === 'action_miss') {
+            await recordDoseStatus(medId, timeStr, todayStr, 'missed');
+          }
         }
 
         // Dismiss delivered notification from Android status bar tray
@@ -92,6 +93,9 @@ export async function scheduleNativeLocalNotifications() {
         if (window.refreshCurrentView) {
           window.refreshCurrentView();
         }
+
+        // Ensure user is NOT kept inside app when tapping action buttons
+        await App.minimizeApp().catch(() => {});
       } catch (err) {
         console.log('Action listener note:', err);
       }
