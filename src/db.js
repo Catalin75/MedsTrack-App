@@ -127,7 +127,12 @@ export async function saveMedication(med) {
     const tx = db.transaction('medications', 'readwrite');
     const store = tx.objectStore('medications');
     const request = store.put(med);
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('medications-updated'));
+      }
+      resolve(request.result);
+    };
     request.onerror = (e) => reject(e.target.error);
   });
 }
@@ -138,7 +143,12 @@ export async function deleteMedication(id) {
     const tx = db.transaction('medications', 'readwrite');
     const store = tx.objectStore('medications');
     const request = store.delete(Number(id));
-    request.onsuccess = () => resolve();
+    request.onsuccess = () => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('medications-updated'));
+      }
+      resolve();
+    };
     request.onerror = (e) => reject(e.target.error);
   });
 }
