@@ -134,22 +134,21 @@ function renderCabinetCard(med) {
         </div>
       </div>
 
-      <!-- Stock Info & Progress -->
-      <div class="space-y-2 pt-1">
-        <div class="flex justify-between items-center text-xs">
-          <span class="text-on-surface-variant">Stoc disponibil</span>
-          <span class="font-bold ${isUnlimited ? 'text-primary' : (isLowStock ? 'text-error animate-pulse' : 'text-on-surface')} flex items-center gap-1">
-            ${isUnlimited
-              ? '<span class="material-symbols-outlined text-sm">all_inclusive</span> Nelimitat (∞)'
-              : `${remStk} doze rămase (din ${totStk}) ${isLowStock ? '(Scăzut!)' : ''}`
-            }
-          </span>
-        </div>
+      <!-- Stock Info & Progress (Hidden if Unlimited) -->
+      ${!isUnlimited ? `
+        <div class="space-y-2 pt-1">
+          <div class="flex justify-between items-center text-xs">
+            <span class="text-on-surface-variant">Stoc disponibil</span>
+            <span class="font-bold ${isLowStock ? 'text-error animate-pulse' : 'text-on-surface'} flex items-center gap-1">
+              ${remStk} doze rămase (din ${totStk}) ${isLowStock ? '(Scăzut!)' : ''}
+            </span>
+          </div>
 
-        <div class="w-full h-2 bg-surface-container-highest rounded-full overflow-hidden">
-          <div class="h-full ${isUnlimited ? 'bg-primary' : (isLowStock ? 'bg-error' : 'bg-secondary')} rounded-full transition-all duration-700" style="width: ${progressPercent}%;"></div>
+          <div class="w-full h-2 bg-surface-container-highest rounded-full overflow-hidden">
+            <div class="h-full ${isLowStock ? 'bg-error' : 'bg-secondary'} rounded-full transition-all duration-700" style="width: ${progressPercent}%;"></div>
+          </div>
         </div>
-      </div>
+      ` : ''}
 
       <!-- Action Buttons -->
       <div class="flex justify-between items-center pt-2 border-t border-outline-variant/20 text-xs font-bold">
