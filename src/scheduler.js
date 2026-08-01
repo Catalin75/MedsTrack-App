@@ -47,13 +47,13 @@ export async function scheduleNativeLocalNotifications() {
     const perm = await LocalNotifications.requestPermissions();
     if (perm.display !== 'granted') return;
 
-    // 2. Register Interactive Action Types (🟢 Luat, 🟡 Amână 10 min, 🔴 Ratat)
+    // 2. Register Interactive Action Types (🟢 Luat, 🟡 Amână 10 min, 🔴 Ratat) - All Background (foreground: false)
     await LocalNotifications.registerActionTypes({
       types: [
         {
           id: 'MED_ALARM_ACTIONS',
           actions: [
-            { id: 'action_take', title: '🟢 Luat', foreground: true },
+            { id: 'action_take', title: '🟢 Luat', foreground: false },
             { id: 'action_snooze', title: '🟡 Amână 10 min', foreground: false },
             { id: 'action_miss', title: '🔴 Ratat', foreground: false }
           ]
@@ -61,7 +61,7 @@ export async function scheduleNativeLocalNotifications() {
       ]
     }).catch(err => console.log('ActionTypes reg note:', err));
 
-    // 3. Attach Action Listener for Notification Buttons
+    // 3. Attach Action Listener for Notification Buttons (Silent Background Execution)
     LocalNotifications.addListener('localNotificationActionPerformed', async (notificationAction) => {
       try {
         const actionId = notificationAction.actionId;
@@ -69,20 +69,28 @@ export async function scheduleNativeLocalNotifications() {
         const { medId, timeStr } = extra;
 
         if (!medId || !timeStr) return;
+        const todayStr = getTodayString();
+        const key = `${medId}_${todayStr}_${timeStr}`;
+
+        // Track as already handled so in-app modal does not pop up if app is opened later
+        notifiedDosesSet.add(key);
+
         const med = await getMedication(medId);
         if (!med) return;
 
         if (actionId === 'action_take') {
-          await recordDoseStatus(medId, timeStr, getTodayString(), 'taken');
-          const isUnlim = med.isUnlimited || med.totalStock === 'unlimited';
-          showToast(isUnlim ? `Doza de ${med.name} a fost marcată ca Luată.` : `Doza de ${med.name} a fost marcată ca Luată. Stocul s-a actualizat.`);
-          if (window.refreshCurrentView) window.refreshCurrentView();
+          await recordDoseStatus(medId, timeStr, todayStr, 'taken');
         } else if (actionId === 'action_snooze') {
           snoozeDose(med, timeStr);
         } else if (actionId === 'action_miss') {
-          await recordDoseStatus(medId, timeStr, getTodayString(), 'missed');
-          showToast(`Doza de ${med.name} a fost marcată ca Ratată.`);
-          if (window.refreshCurrentView) window.refreshCurrentView();
+          await recordDoseStatus(medId, timeStr, todayStr, 'missed');
+        }
+
+        // Dismiss delivered notification from Android status bar tray
+        await LocalNotifications.removeAllDelivered().catch(() => {});
+
+        if (window.refreshCurrentView) {
+          window.refreshCurrentView();
         }
       } catch (err) {
         console.log('Action listener note:', err);
