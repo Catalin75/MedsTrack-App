@@ -5,6 +5,7 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 
 let schedulerInterval = null;
 const notifiedDosesSet = new Set(); // Tracks format: `${medId}_${dateStr}_${timeStr}`
+let isListenerAttached = false;
 
 /**
  * Initializes the background scheduler and requests notification permissions.
@@ -15,6 +16,12 @@ export function initDoseScheduler() {
     Notification.requestPermission().catch(err => {
       console.log('Notification permission request note:', err);
     });
+  }
+
+  // Attach auto-update listener on medication changes
+  if (typeof window !== 'undefined' && !isListenerAttached) {
+    window.addEventListener('medications-updated', scheduleNativeLocalNotifications);
+    isListenerAttached = true;
   }
 
   // Schedule native mobile OS local notifications via Capacitor
@@ -36,12 +43,31 @@ export async function scheduleNativeLocalNotifications() {
     const isCapacitor = window.Capacitor && window.Capacitor.isNativePlatform();
     if (!isCapacitor) return;
 
+    // 1. Request Android Notification Permissions
     const perm = await LocalNotifications.requestPermissions();
     if (perm.display !== 'granted') return;
 
+    // 2. Create MAX Importance Channel for Floating Heads-up Banner over Screen & Stand-by Wakeup
+    await LocalNotifications.createChannel({
+      id: 'medstrack_alarms_v2',
+      name: 'Alerte Medicamente MedsTrack',
+      description: 'Notificări prioritare plutitoare pe ecran pentru administrarea medicamentelor',
+      importance: 5, // IMPORTANCE_MAX (High Priority Floating Banner)
+      visibility: 1, // VISIBILITY_PUBLIC on Lock Screen
+      vibration: true,
+      lights: true,
+      lightColor: '#0052b4'
+    }).catch(err => console.log('Channel creation note:', err));
+
     const medications = await getMedications();
     const notificationsToSchedule = [];
-    let idCounter = 1000;
+    let notificationIdCounter = 1000;
+
+    // Cancel previously pending local notifications to refresh
+    const pending = await LocalNotifications.getPending().catch(() => ({ notifications: [] }));
+    if (pending && pending.notifications && pending.notifications.length > 0) {
+      await LocalNotifications.cancel(pending).catch(() => {});
+    }
 
     for (const med of medications) {
       if (!med.times || !Array.isArray(med.times)) continue;
@@ -49,7 +75,10 @@ export async function scheduleNativeLocalNotifications() {
       const categoryPart = med.treatmentCategory ? `[${med.treatmentCategory}] ` : '';
       const title = `💊 ${categoryPart}${med.name}`;
 
-      for (const timeStr of med.times) {
+      for (let tIdx = 0; tIdx < med.times.length; tIdx++) {
+        const timeStr = med.times[tIdx];
+        if (!timeStr) continue;
+
         const [hours, minutes] = timeStr.split(':').map(Number);
         
         const scheduleDate = new Date();
@@ -58,12 +87,26 @@ export async function scheduleNativeLocalNotifications() {
           scheduleDate.setDate(scheduleDate.getDate() + 1);
         }
 
+        const isUnlim = med.isUnlimited || med.totalStock === 'unlimited';
+        const bodyText = isUnlim
+          ? `⏰ Ora ${timeStr} • Doză: ${med.dosageDisplay || '1 comprimat'}`
+          : `⏰ Ora ${timeStr} • Doză: ${med.dosageDisplay || '1 comprimat'}\n📋 Stoc: ${med.remainingStock !== undefined ? med.remainingStock : (med.totalStock || 20)} doze`;
+
+        const uniqueId = Number(`${med.id || 1}${tIdx + 1}${notificationIdCounter++}`);
+
         notificationsToSchedule.push({
           title,
-          body: `⏰ Ora ${timeStr} • Doză: ${med.dosageDisplay || '1 comprimat'} • Forma: ${med.formLabel || 'Comprimat'}`,
-          id: idCounter++,
-          schedule: { at: scheduleDate, repeats: true, every: 'day' },
-          sound: null,
+          body: bodyText,
+          id: Math.abs(uniqueId) % 2147483647,
+          schedule: {
+            at: scheduleDate,
+            repeats: true,
+            every: 'day',
+            allowWhileIdle: true // WAKES UP CPU / PHONE SCREEN IN STAND-BY DOZE MODE
+          },
+          channelId: 'medstrack_alarms_v2',
+          smallIcon: 'ic_launcher',
+          iconColor: '#0052b4',
           actionTypeId: 'MED_ALARM',
           extra: { medId: med.id, timeStr }
         });
@@ -71,7 +114,9 @@ export async function scheduleNativeLocalNotifications() {
     }
 
     if (notificationsToSchedule.length > 0) {
-      await LocalNotifications.schedule({ notifications: notificationsToSchedule }).catch(() => {});
+      await LocalNotifications.schedule({ notifications: notificationsToSchedule }).catch(err => {
+        console.log('LocalNotifications schedule note:', err);
+      });
     }
   } catch (err) {
     console.log('LocalNotifications init note:', err);
