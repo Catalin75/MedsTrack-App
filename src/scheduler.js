@@ -149,10 +149,12 @@ function sendWebNotification(med, timeStr) {
   const title = `💊 ${categoryPart}${med.name}`;
 
   const isUnlim = med.isUnlimited || med.totalStock === 'unlimited';
-  const stockStr = isUnlim ? 'Nelimitat (∞)' : `${med.remainingStock !== undefined ? med.remainingStock : (med.totalStock || 20)} doze`;
+  const bodyText = isUnlim
+    ? `⏰ Ora ${timeStr} • Doză: ${med.dosageDisplay || '1 comprimat'}`
+    : `⏰ Ora ${timeStr} • Doză: ${med.dosageDisplay || '1 comprimat'}\n📋 Stoc: ${med.remainingStock !== undefined ? med.remainingStock : (med.totalStock || 20)} doze`;
 
   const options = {
-    body: `⏰ Ora ${timeStr} • Doză: ${med.dosageDisplay || '1 comprimat'}\n📋 Forma: ${med.formLabel || 'Comprimat'} • Stoc: ${stockStr}`,
+    body: bodyText,
     icon: '/manifest.json',
     tag: `dose_${med.id}_${todayStringClean(timeStr)}`,
     renotify: true,
@@ -206,7 +208,6 @@ export function displayInAppDoseModal(med, timeStr) {
   }
 
   const isUnlim = med.isUnlimited || med.totalStock === 'unlimited';
-  const stockStr = isUnlim ? 'Nelimitat (∞)' : `${med.remainingStock !== undefined ? med.remainingStock : (med.totalStock || 20)} doze`;
 
   const modal = document.createElement('div');
   modal.id = 'dose-alarm-modal';
@@ -236,18 +237,16 @@ export function displayInAppDoseModal(med, timeStr) {
 
       <!-- Detailed Info Box -->
       <div class="bg-surface-container-low p-3.5 rounded-2xl border border-outline-variant/30 space-y-1.5 text-xs text-left">
-        <div class="flex justify-between items-center">
-          <span class="text-outline font-medium">Cantitate / Doză:</span>
-          <span class="font-bold text-primary text-sm">${med.dosageDisplay || '1 comprimat'}</span>
+        <div class="flex justify-between items-start">
+          <span class="text-outline font-medium">Medicație / Doză:</span>
+          <span class="font-bold text-primary text-sm text-right">${med.dosageDisplay || '1 comprimat'}</span>
         </div>
-        <div class="flex justify-between items-center pt-1 border-t border-outline-variant/20">
-          <span class="text-outline font-medium">Forma farmaceutică:</span>
-          <span class="font-bold text-on-surface">${med.formLabel || 'Comprimat'}</span>
-        </div>
-        <div class="flex justify-between items-center pt-1 border-t border-outline-variant/20">
-          <span class="text-outline font-medium">Stoc disponibil:</span>
-          <span class="font-bold ${isUnlim ? 'text-primary' : 'text-on-surface'}">${stockStr}</span>
-        </div>
+        ${!isUnlim ? `
+          <div class="flex justify-between items-center pt-1.5 border-t border-outline-variant/20">
+            <span class="text-outline font-medium">Stoc disponibil:</span>
+            <span class="font-bold text-on-surface">${med.remainingStock !== undefined ? med.remainingStock : (med.totalStock || 20)} doze</span>
+          </div>
+        ` : ''}
       </div>
 
       <!-- 3 Action Buttons -->
@@ -279,7 +278,11 @@ export function displayInAppDoseModal(med, timeStr) {
   modal.querySelector('#btn-modal-take-dose').addEventListener('click', async () => {
     await recordDoseStatus(med.id, timeStr, getTodayString(), 'taken');
     modal.remove();
-    showToast(`Doza de ${med.name} a fost marcată ca Luată. Stocul s-a actualizat.`);
+    const isUnlim = med.isUnlimited || med.totalStock === 'unlimited';
+    const toastMsg = isUnlim
+      ? `Doza de ${med.name} a fost marcată ca Luată.`
+      : `Doza de ${med.name} a fost marcată ca Luată. Stocul s-a actualizat.`;
+    showToast(toastMsg);
     if (window.refreshCurrentView) {
       window.refreshCurrentView();
     }
