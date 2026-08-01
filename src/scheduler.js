@@ -62,7 +62,20 @@ export async function scheduleNativeLocalNotifications() {
       ]
     }).catch(err => console.log('ActionTypes reg note:', err));
 
-    // 3. Attach Action Listener for Notification Buttons (Silent Background Execution + Immediate Minimize)
+    // 3. Play Recorded Voice Memo when Notification is delivered on screen
+    LocalNotifications.addListener('localNotificationReceived', async (notification) => {
+      try {
+        const extra = notification.extra || {};
+        const soundChoice = extra.soundChoice;
+        if (soundChoice && (soundChoice === 'voice' || soundChoice.startsWith('voice_'))) {
+          playNotificationSound(soundChoice, 100, 3);
+        }
+      } catch (err) {
+        console.log('Notification received sound note:', err);
+      }
+    });
+
+    // 4. Attach Action Listener for Notification Buttons (Silent Background Execution + Immediate Minimize)
     LocalNotifications.addListener('localNotificationActionPerformed', async (notificationAction) => {
       try {
         const actionId = notificationAction.actionId;
@@ -90,11 +103,11 @@ export async function scheduleNativeLocalNotifications() {
                 body: `⏰ Ora ${timeStr} • Doză: ${med.dosageDisplay || '1 comprimat'}`,
                 id: Math.floor(Math.random() * 800000) + 100000,
                 schedule: { at: snoozeDate, allowWhileIdle: true },
-                channelId: `medstrack_channel_${soundKey}`,
+                channelId: (soundKey.startsWith('voice') ? 'medstrack_channel_bell' : `medstrack_channel_${soundKey}`),
                 smallIcon: 'ic_launcher',
                 iconColor: '#0052b4',
                 actionTypeId: 'MED_ALARM_ACTIONS',
-                extra: { medId: med.id, timeStr }
+                extra: { medId: med.id, timeStr, soundChoice: med.soundChoice }
               }]
             }).catch(() => {});
           } else if (actionId === 'action_miss') {
@@ -117,10 +130,13 @@ export async function scheduleNativeLocalNotifications() {
     });
 
     const medications = await getMedications();
+    const todayStr = getTodayString();
+    const todayLogs = await getLogsForDate(todayStr);
+
     const notificationsToSchedule = [];
     let notificationIdCounter = 1000;
 
-    // Cancel previously pending local notifications to refresh
+    // Cancel previously pending local notifications to refresh cleanly
     const pending = await LocalNotifications.getPending().catch(() => ({ notifications: [] }));
     if (pending && pending.notifications && pending.notifications.length > 0) {
       await LocalNotifications.cancel(pending).catch(() => {});
@@ -136,16 +152,19 @@ export async function scheduleNativeLocalNotifications() {
       }
 
       // Selected Sound Channel
-      const soundKey = (med.soundChoice || 'bell').toLowerCase().replace(/[^a-z0-9]/g, '');
-      const channelId = `medstrack_channel_${soundKey}`;
+      const soundChoice = med.soundChoice || 'bell';
+      const soundKey = soundChoice.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const isVoice = soundKey.startsWith('voice');
+      const channelId = isVoice ? 'medstrack_channel_voice' : `medstrack_channel_${soundKey}`;
+      const channelSound = isVoice ? 'bell.wav' : `${soundKey}.wav`;
 
       await LocalNotifications.createChannel({
         id: channelId,
-        name: `Alerte ${soundKey}`,
+        name: isVoice ? 'Alerte Memento Vocal' : `Alerte ${soundKey}`,
         description: 'Notificări prioritare plutitoare pe ecran pentru administrarea medicamentelor',
         importance: 5, // IMPORTANCE_MAX (High Priority Floating Banner)
         visibility: 1, // VISIBILITY_PUBLIC on Lock Screen
-        sound: `${soundKey}.wav`,
+        sound: channelSound,
         vibration: true,
         lights: true,
         lightColor: '#0052b4'
@@ -157,9 +176,14 @@ export async function scheduleNativeLocalNotifications() {
 
         const [hours, minutes] = timeStr.split(':').map(Number);
         
+        // Check if this dose was ALREADY logged today (taken or missed)
+        const isAlreadyLogged = todayLogs.some(l => Number(l.medicationId) === Number(med.id) && l.scheduledTime === timeStr);
+
         const scheduleDate = new Date();
         scheduleDate.setHours(hours, minutes, 0, 0);
-        if (scheduleDate.getTime() <= Date.now()) {
+
+        // If ALREADY LOGGED TODAY or time has passed today, schedule for TOMORROW!
+        if (isAlreadyLogged || scheduleDate.getTime() <= (Date.now() + 60000)) {
           scheduleDate.setDate(scheduleDate.getDate() + 1);
         }
 
@@ -181,11 +205,11 @@ export async function scheduleNativeLocalNotifications() {
             allowWhileIdle: true // WAKES UP CPU / PHONE SCREEN IN STAND-BY DOZE MODE
           },
           channelId,
-          sound: `${soundKey}.wav`,
+          sound: channelSound,
           smallIcon: 'ic_launcher',
           iconColor: '#0052b4',
           actionTypeId: 'MED_ALARM_ACTIONS',
-          extra: { medId: med.id, timeStr }
+          extra: { medId: med.id, timeStr, soundChoice }
         });
       }
     }
@@ -383,17 +407,18 @@ export function displayInAppDoseModal(med, timeStr) {
         </button>
 
         <!-- Button 2: Amână 10 minute -->
-        <button id="btn-modal-snooze-dose" class="w-full h-12 bg-secondary-container text-on-secondary-container font-bold rounded-2xl hover:bg-secondary-container/80 active:scale-95 transition-all flex items-center justify-center gap-2 text-sm">
-          <span class="material-symbols-outlined text-xl">schedule</span>
+        <button id="btn-modal-snooze-dose" class="w-full h-11 bg-secondary-container text-on-secondary-container font-bold rounded-2xl border border-secondary/30 hover:bg-secondary-fixed active:scale-95 transition-all flex items-center justify-center gap-2 text-sm">
+          <span class="material-symbols-outlined text-lg">schedule</span>
           <span>Amână 10 minute</span>
         </button>
 
         <!-- Button 3: Ratat -->
-        <button id="btn-modal-miss-dose" class="w-full h-12 bg-error-container/40 text-error font-bold rounded-2xl hover:bg-error-container active:scale-95 transition-all flex items-center justify-center gap-2 text-sm">
-          <span class="material-symbols-outlined text-xl">cancel</span>
+        <button id="btn-modal-miss-dose" class="w-full h-11 bg-error-container/60 text-error font-bold rounded-2xl border border-error/30 hover:bg-error-container active:scale-95 transition-all flex items-center justify-center gap-2 text-sm">
+          <span class="material-symbols-outlined text-lg">cancel</span>
           <span>Ratat</span>
         </button>
       </div>
+
     </div>
   `;
 
@@ -413,7 +438,7 @@ export function displayInAppDoseModal(med, timeStr) {
     }
   });
 
-  // 2. Action AMÂNĂ 10 MINUTE
+  // 2. Action AMÂNĂ 10 MIN
   modal.querySelector('#btn-modal-snooze-dose').addEventListener('click', () => {
     modal.remove();
     snoozeDose(med, timeStr);
@@ -423,24 +448,9 @@ export function displayInAppDoseModal(med, timeStr) {
   modal.querySelector('#btn-modal-miss-dose').addEventListener('click', async () => {
     await recordDoseStatus(med.id, timeStr, getTodayString(), 'missed');
     modal.remove();
-    showToast(`Doza de ${med.name} a fost marcată ca Ratată. Stocul nu s-a modificat.`);
+    showToast(`Doza de ${med.name} a fost marcată ca Ratată.`);
     if (window.refreshCurrentView) {
       window.refreshCurrentView();
     }
   });
-}
-
-function showToast(message) {
-  const existing = document.getElementById('app-toast');
-  if (existing) existing.remove();
-
-  const toast = document.createElement('div');
-  toast.id = 'app-toast';
-  toast.className = 'fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-full shadow-xl border border-white/20 animate-in fade-in slide-in-from-top-4 duration-200';
-  toast.innerText = message;
-
-  document.body.appendChild(toast);
-  setTimeout(() => {
-    toast.remove();
-  }, 3500);
 }
