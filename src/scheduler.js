@@ -1,4 +1,10 @@
 // Real-time Dose Scheduler & Background Notification Service for MedsTrack
+// ===========================================================================
+// ARCHITECTURE:
+// - Native Android: Uses OS-level LocalNotifications (one-shot, no repeats)
+//   with STABLE deterministic IDs. Listeners are attached exactly ONCE.
+// - Web/Browser: Uses 10-second polling interval with in-app modal.
+// ===========================================================================
 import { getMedications, getLogsForDate, getTodayString, recordDoseStatus, getMedication } from './db.js';
 import { playNotificationSound } from './audio.js';
 import { LocalNotifications } from '@capacitor/local-notifications';
@@ -6,184 +12,354 @@ import { App } from '@capacitor/app';
 
 let schedulerInterval = null;
 const notifiedDosesSet = new Set(); // Tracks format: `${medId}_${dateStr}_${timeStr}`
-let isListenerAttached = false;
+let nativeListenersAttached = false;
+let scheduleDebounceTimer = null;
 
-/**
- * Initializes the background scheduler and requests notification permissions.
- */
+// ============================================================================
+// STABLE NOTIFICATION ID GENERATOR
+// ============================================================================
+// Produces a deterministic integer from medId + timeStr so the SAME dose
+// always maps to the SAME notification ID. This ensures cancellation works
+// correctly and prevents duplicate/phantom notifications.
+// ============================================================================
+function getStableNotificationId(medId, timeStr) {
+  const numericMedId = Number(medId) || 1;
+  const timeParts = timeStr.split(':');
+  const timeNum = Number(timeParts[0]) * 60 + Number(timeParts[1]); // 0..1439
+  // Ensure positive 32-bit integer within Android's int range
+  return ((numericMedId * 10000 + timeNum) % 2000000000) + 1;
+}
+
+// Snooze IDs are offset to avoid collisions with regular dose IDs
+function getSnoozeNotificationId(medId, timeStr) {
+  return getStableNotificationId(medId, timeStr) + 5000000;
+}
+
+// ============================================================================
+// INIT — Called once on app startup
+// ============================================================================
 export function initDoseScheduler() {
-  // Request Web Notifications permission
+  // Request Web Notifications permission (for browser fallback)
   if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission().catch(err => {
-      console.log('Notification permission request note:', err);
+    Notification.requestPermission().catch(() => {});
+  }
+
+  const isCapacitor = window.Capacitor && window.Capacitor.isNativePlatform();
+
+  if (isCapacitor && !nativeListenersAttached) {
+    nativeListenersAttached = true;
+
+    // Attach all native listeners ONCE (never again)
+    attachNativeListenersOnce();
+
+    // Listen for medication changes with heavy debounce
+    window.addEventListener('medications-updated', () => {
+      debouncedReschedule();
     });
   }
 
-  // Attach auto-update listener on medication changes
-  if (typeof window !== 'undefined' && !isListenerAttached) {
-    window.addEventListener('medications-updated', scheduleNativeLocalNotifications);
-    isListenerAttached = true;
-  }
-
-  // Schedule native mobile OS local notifications via Capacitor
+  // Initial schedule
   scheduleNativeLocalNotifications();
 
-  if (schedulerInterval) {
-    clearInterval(schedulerInterval);
-  }
-
+  // Web-only polling (returns immediately on Capacitor)
+  if (schedulerInterval) clearInterval(schedulerInterval);
   checkScheduledDoses();
   schedulerInterval = setInterval(checkScheduledDoses, 10000);
 }
 
-/**
- * Schedules exact OS-level background notifications on mobile devices via Capacitor.
- */
+// ============================================================================
+// DEBOUNCE — Prevents rapid-fire rescheduling from cascading events
+// ============================================================================
+function debouncedReschedule() {
+  if (scheduleDebounceTimer) clearTimeout(scheduleDebounceTimer);
+  scheduleDebounceTimer = setTimeout(() => {
+    scheduleNativeLocalNotifications();
+  }, 3000); // Wait 3 seconds before rescheduling
+}
+
+// ============================================================================
+// NATIVE LISTENERS — Attached exactly ONCE during app lifetime
+// ============================================================================
+function attachNativeListenersOnce() {
+  // 1. Register action button types
+  LocalNotifications.registerActionTypes({
+    types: [{
+      id: 'MED_ALARM_ACTIONS',
+      actions: [
+        { id: 'action_take', title: '🟢 Luat', foreground: false },
+        { id: 'action_snooze', title: '🟡 Amână 10 min', foreground: false },
+        { id: 'action_miss', title: '🔴 Ratat', foreground: false }
+      ]
+    }]
+  }).catch(() => {});
+
+  // 2. When notification appears on screen (app in foreground) — play voice memo
+  LocalNotifications.addListener('localNotificationReceived', async (notification) => {
+    try {
+      const extra = notification.extra || {};
+      const soundChoice = extra.soundChoice;
+      if (soundChoice && (soundChoice === 'voice' || soundChoice.startsWith('voice_'))) {
+        playNotificationSound(soundChoice, 100, 3);
+      }
+    } catch (err) {
+      console.log('Notification received sound note:', err);
+    }
+  });
+
+  // 3. When user taps an action button on the notification
+  LocalNotifications.addListener('localNotificationActionPerformed', async (notificationAction) => {
+    try {
+      const actionId = notificationAction.actionId;
+      const extra = notificationAction.notification.extra || {};
+      const medId = extra.medId;
+      const timeStr = extra.timeStr;
+
+      if (!medId || !timeStr) return;
+
+      const todayStr = getTodayString();
+      const key = `${medId}_${todayStr}_${timeStr}`;
+
+      // Mark as handled to prevent any in-app duplicate
+      notifiedDosesSet.add(key);
+
+      const med = await getMedication(medId);
+
+      if (med) {
+        if (actionId === 'action_take') {
+          await recordDoseStatus(medId, timeStr, todayStr, 'taken');
+        } else if (actionId === 'action_snooze') {
+          // Schedule a SINGLE one-shot snooze notification in 10 minutes
+          await scheduleSnoozeNotification(med, timeStr);
+        } else if (actionId === 'action_miss') {
+          await recordDoseStatus(medId, timeStr, todayStr, 'missed');
+        }
+      }
+
+      // Cancel the original notification explicitly by its stable ID
+      const stableId = getStableNotificationId(medId, timeStr);
+      await LocalNotifications.cancel({ notifications: [{ id: stableId }] }).catch(() => {});
+
+      // Clear all delivered notifications from the tray
+      await LocalNotifications.removeAllDelivered().catch(() => {});
+
+      // Schedule this dose for TOMORROW (one-shot, non-repeating)
+      if (actionId !== 'action_snooze' && med) {
+        await scheduleOneDoseForTomorrow(med, timeStr);
+      }
+
+      // Refresh app UI if visible
+      if (window.refreshCurrentView) {
+        window.refreshCurrentView();
+      }
+
+      // Minimize app immediately — user stays on their phone screen
+      await App.minimizeApp().catch(() => {});
+    } catch (err) {
+      console.log('Action listener error:', err);
+    }
+  });
+}
+
+// ============================================================================
+// SCHEDULE A SINGLE SNOOZE NOTIFICATION (one-shot, 10 min from now)
+// ============================================================================
+async function scheduleSnoozeNotification(med, timeStr) {
+  const snoozeDate = new Date(Date.now() + 10 * 60 * 1000);
+  const snoozeId = getSnoozeNotificationId(med.id, timeStr);
+
+  // Cancel any previous snooze for this exact dose first
+  await LocalNotifications.cancel({ notifications: [{ id: snoozeId }] }).catch(() => {});
+
+  const soundChoice = med.soundChoice || 'bell';
+  const soundKey = soundChoice.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const isVoice = soundKey.startsWith('voice');
+
+  await LocalNotifications.schedule({
+    notifications: [{
+      title: `⏰ AMÂNAT: ${med.name}`,
+      body: `⏰ Ora ${timeStr} • Doză: ${med.dosageDisplay || '1 comprimat'}`,
+      id: snoozeId,
+      schedule: {
+        at: snoozeDate,
+        allowWhileIdle: true
+        // NO repeats — fires exactly once
+      },
+      channelId: isVoice ? 'medstrack_channel_bell' : `medstrack_channel_${soundKey}`,
+      sound: isVoice ? 'bell.wav' : `${soundKey}.wav`,
+      smallIcon: 'ic_launcher',
+      iconColor: '#0052b4',
+      actionTypeId: 'MED_ALARM_ACTIONS',
+      extra: { medId: med.id, timeStr, soundChoice }
+    }]
+  }).catch(() => {});
+}
+
+// ============================================================================
+// SCHEDULE ONE DOSE FOR TOMORROW (called after user handles today's dose)
+// ============================================================================
+async function scheduleOneDoseForTomorrow(med, timeStr) {
+  try {
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    const tomorrowDate = new Date();
+    tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+    tomorrowDate.setHours(hours, minutes, 0, 0);
+
+    const notifId = getStableNotificationId(med.id, timeStr);
+
+    let title = `💊 ${med.name}`;
+    if (med.treatmentCategory && med.treatmentCategory.trim() !== '' &&
+        med.treatmentCategory.toLowerCase() !== med.name.toLowerCase() &&
+        med.treatmentCategory.toLowerCase() !== 'general') {
+      title = `💊 [${med.treatmentCategory}] ${med.name}`;
+    }
+
+    const soundChoice = med.soundChoice || 'bell';
+    const soundKey = soundChoice.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const isVoice = soundKey.startsWith('voice');
+    const channelId = isVoice ? 'medstrack_channel_bell' : `medstrack_channel_${soundKey}`;
+    const channelSound = isVoice ? 'bell.wav' : `${soundKey}.wav`;
+
+    const isUnlim = med.isUnlimited || med.totalStock === 'unlimited';
+    const bodyText = isUnlim
+      ? `⏰ Ora ${timeStr} • Doză: ${med.dosageDisplay || '1 comprimat'}`
+      : `⏰ Ora ${timeStr} • Doză: ${med.dosageDisplay || '1 comprimat'} (${med.remainingStock !== undefined ? med.remainingStock : (med.totalStock || 20)} doze)`;
+
+    await LocalNotifications.schedule({
+      notifications: [{
+        title,
+        body: bodyText,
+        id: notifId,
+        schedule: {
+          at: tomorrowDate,
+          allowWhileIdle: true
+          // NO repeats — one-shot only
+        },
+        channelId,
+        sound: channelSound,
+        smallIcon: 'ic_launcher',
+        iconColor: '#0052b4',
+        actionTypeId: 'MED_ALARM_ACTIONS',
+        extra: { medId: med.id, timeStr, soundChoice }
+      }]
+    }).catch(() => {});
+  } catch (err) {
+    console.log('Schedule tomorrow note:', err);
+  }
+}
+
+// ============================================================================
+// MAIN SCHEDULING FUNCTION — Schedules all upcoming dose notifications
+// ============================================================================
+// Called on:
+//   - App startup (initDoseScheduler)
+//   - After medication is added/edited/deleted (debounced medications-updated)
+//
+// Strategy:
+//   1. Cancel ALL currently pending notifications (clean slate)
+//   2. For each medication + time:
+//      a. If dose already logged today → schedule for TOMORROW
+//      b. If time already passed today → schedule for TOMORROW
+//      c. Otherwise → schedule for TODAY
+//   3. Each notification is ONE-SHOT (no repeats!)
+//   4. Uses STABLE deterministic IDs
+// ============================================================================
 export async function scheduleNativeLocalNotifications() {
   try {
     const isCapacitor = window.Capacitor && window.Capacitor.isNativePlatform();
     if (!isCapacitor) return;
 
-    // 1. Request Android Notification Permissions
     const perm = await LocalNotifications.requestPermissions();
     if (perm.display !== 'granted') return;
 
-    // 2. Register Interactive Action Types (🟢 Luat, 🟡 Amână 10 min, 🔴 Ratat) - All Background (foreground: false)
-    await LocalNotifications.registerActionTypes({
-      types: [
-        {
-          id: 'MED_ALARM_ACTIONS',
-          actions: [
-            { id: 'action_take', title: '🟢 Luat', foreground: false },
-            { id: 'action_snooze', title: '🟡 Amână 10 min', foreground: false },
-            { id: 'action_miss', title: '🔴 Ratat', foreground: false }
-          ]
-        }
-      ]
-    }).catch(err => console.log('ActionTypes reg note:', err));
-
-    // 3. Play Recorded Voice Memo when Notification is delivered on screen
-    LocalNotifications.addListener('localNotificationReceived', async (notification) => {
-      try {
-        const extra = notification.extra || {};
-        const soundChoice = extra.soundChoice;
-        if (soundChoice && (soundChoice === 'voice' || soundChoice.startsWith('voice_'))) {
-          playNotificationSound(soundChoice, 100, 3);
-        }
-      } catch (err) {
-        console.log('Notification received sound note:', err);
-      }
-    });
-
-    // 4. Attach Action Listener for Notification Buttons (Silent Background Execution + Immediate Minimize)
-    LocalNotifications.addListener('localNotificationActionPerformed', async (notificationAction) => {
-      try {
-        const actionId = notificationAction.actionId;
-        const extra = notificationAction.notification.extra || {};
-        const { medId, timeStr } = extra;
-
-        if (!medId || !timeStr) return;
-        const todayStr = getTodayString();
-        const key = `${medId}_${todayStr}_${timeStr}`;
-
-        // Track as already handled so in-app modal does not pop up if app is opened later
-        notifiedDosesSet.add(key);
-
-        const med = await getMedication(medId);
-        if (med) {
-          if (actionId === 'action_take') {
-            await recordDoseStatus(medId, timeStr, todayStr, 'taken');
-          } else if (actionId === 'action_snooze') {
-            // Schedule a single 10-minute snooze notification
-            const snoozeDate = new Date(Date.now() + 10 * 60 * 1000);
-            const soundKey = (med.soundChoice || 'bell').toLowerCase().replace(/[^a-z0-9]/g, '');
-            await LocalNotifications.schedule({
-              notifications: [{
-                title: `⏰ AMÂNAT: ${med.name}`,
-                body: `⏰ Ora ${timeStr} • Doză: ${med.dosageDisplay || '1 comprimat'}`,
-                id: Math.floor(Math.random() * 800000) + 100000,
-                schedule: { at: snoozeDate, allowWhileIdle: true },
-                channelId: (soundKey.startsWith('voice') ? 'medstrack_channel_bell' : `medstrack_channel_${soundKey}`),
-                smallIcon: 'ic_launcher',
-                iconColor: '#0052b4',
-                actionTypeId: 'MED_ALARM_ACTIONS',
-                extra: { medId: med.id, timeStr, soundChoice: med.soundChoice }
-              }]
-            }).catch(() => {});
-          } else if (actionId === 'action_miss') {
-            await recordDoseStatus(medId, timeStr, todayStr, 'missed');
-          }
-        }
-
-        // Dismiss delivered notification from Android status bar tray
-        await LocalNotifications.removeAllDelivered().catch(() => {});
-
-        if (window.refreshCurrentView) {
-          window.refreshCurrentView();
-        }
-
-        // Ensure user is NOT kept inside app when tapping action buttons
-        await App.minimizeApp().catch(() => {});
-      } catch (err) {
-        console.log('Action listener note:', err);
-      }
-    });
+    // Ensure default bell channel exists (used as fallback for voice memos)
+    await LocalNotifications.createChannel({
+      id: 'medstrack_channel_bell',
+      name: 'Alerte Medicament',
+      description: 'Notificări prioritare pentru administrarea medicamentelor',
+      importance: 5,
+      visibility: 1,
+      sound: 'bell.wav',
+      vibration: true,
+      lights: true,
+      lightColor: '#0052b4'
+    }).catch(() => {});
 
     const medications = await getMedications();
     const todayStr = getTodayString();
     const todayLogs = await getLogsForDate(todayStr);
 
-    const notificationsToSchedule = [];
-    let notificationIdCounter = 1000;
-
-    // Cancel previously pending local notifications to refresh cleanly
+    // 1. Cancel ALL pending notifications for a clean slate
     const pending = await LocalNotifications.getPending().catch(() => ({ notifications: [] }));
     if (pending && pending.notifications && pending.notifications.length > 0) {
       await LocalNotifications.cancel(pending).catch(() => {});
     }
 
+    const notificationsToSchedule = [];
+
     for (const med of medications) {
       if (!med.times || !Array.isArray(med.times)) continue;
 
-      // Deduplicate Title (Avoid [Tttt] Tttt when category === name)
+      // Check if treatment duration is still active
+      if (med.startDate && med.durationDays) {
+        const start = new Date(med.startDate);
+        const todayDate = new Date(todayStr);
+        const diffTime = todayDate.getTime() - start.getTime();
+        const diffDays = Math.floor(diffTime / (1000 * 3600 * 24));
+        if (diffDays < 0 || diffDays >= med.durationDays) continue;
+      }
+
+      // Build notification title
       let title = `💊 ${med.name}`;
-      if (med.treatmentCategory && med.treatmentCategory.trim() !== '' && med.treatmentCategory.toLowerCase() !== med.name.toLowerCase() && med.treatmentCategory.toLowerCase() !== 'general') {
+      if (med.treatmentCategory && med.treatmentCategory.trim() !== '' &&
+          med.treatmentCategory.toLowerCase() !== med.name.toLowerCase() &&
+          med.treatmentCategory.toLowerCase() !== 'general') {
         title = `💊 [${med.treatmentCategory}] ${med.name}`;
       }
 
-      // Selected Sound Channel
+      // Determine sound & channel
       const soundChoice = med.soundChoice || 'bell';
       const soundKey = soundChoice.toLowerCase().replace(/[^a-z0-9]/g, '');
       const isVoice = soundKey.startsWith('voice');
-      const channelId = isVoice ? 'medstrack_channel_voice' : `medstrack_channel_${soundKey}`;
+      const channelId = isVoice ? 'medstrack_channel_bell' : `medstrack_channel_${soundKey}`;
       const channelSound = isVoice ? 'bell.wav' : `${soundKey}.wav`;
 
-      await LocalNotifications.createChannel({
-        id: channelId,
-        name: isVoice ? 'Alerte Memento Vocal' : `Alerte ${soundKey}`,
-        description: 'Notificări prioritare plutitoare pe ecran pentru administrarea medicamentelor',
-        importance: 5, // IMPORTANCE_MAX (High Priority Floating Banner)
-        visibility: 1, // VISIBILITY_PUBLIC on Lock Screen
-        sound: channelSound,
-        vibration: true,
-        lights: true,
-        lightColor: '#0052b4'
-      }).catch(() => {});
+      // Create sound channel (if not voice — voice uses bell channel)
+      if (!isVoice) {
+        await LocalNotifications.createChannel({
+          id: channelId,
+          name: `Alerte ${soundKey}`,
+          description: 'Notificări prioritare pentru administrarea medicamentelor',
+          importance: 5,
+          visibility: 1,
+          sound: channelSound,
+          vibration: true,
+          lights: true,
+          lightColor: '#0052b4'
+        }).catch(() => {});
+      }
 
       for (let tIdx = 0; tIdx < med.times.length; tIdx++) {
         const timeStr = med.times[tIdx];
         if (!timeStr) continue;
 
+        const notifId = getStableNotificationId(med.id, timeStr);
         const [hours, minutes] = timeStr.split(':').map(Number);
-        
-        // Check if this dose was ALREADY logged today (taken or missed)
-        const isAlreadyLogged = todayLogs.some(l => Number(l.medicationId) === Number(med.id) && l.scheduledTime === timeStr);
 
+        // Was this dose already logged today (taken/missed)?
+        const isAlreadyLogged = todayLogs.some(l =>
+          Number(l.medicationId) === Number(med.id) && l.scheduledTime === timeStr
+        );
+
+        // Was this dose already handled in this session?
+        const key = `${med.id}_${todayStr}_${timeStr}`;
+        const isAlreadyHandled = notifiedDosesSet.has(key);
+
+        // Determine fire date
         const scheduleDate = new Date();
         scheduleDate.setHours(hours, minutes, 0, 0);
 
-        // If ALREADY LOGGED TODAY or time has passed today, schedule for TOMORROW!
-        if (isAlreadyLogged || scheduleDate.getTime() <= (Date.now() + 60000)) {
+        // If already logged/handled OR time already passed → schedule for TOMORROW
+        if (isAlreadyLogged || isAlreadyHandled || scheduleDate.getTime() <= Date.now()) {
           scheduleDate.setDate(scheduleDate.getDate() + 1);
         }
 
@@ -192,17 +368,16 @@ export async function scheduleNativeLocalNotifications() {
           ? `⏰ Ora ${timeStr} • Doză: ${med.dosageDisplay || '1 comprimat'}`
           : `⏰ Ora ${timeStr} • Doză: ${med.dosageDisplay || '1 comprimat'} (${med.remainingStock !== undefined ? med.remainingStock : (med.totalStock || 20)} doze)`;
 
-        const uniqueId = Number(`${med.id || 1}${tIdx + 1}${notificationIdCounter++}`);
-
         notificationsToSchedule.push({
           title,
           body: bodyText,
-          id: Math.abs(uniqueId) % 2147483647,
+          id: notifId,
           schedule: {
             at: scheduleDate,
-            repeats: true,
-            every: 'day',
-            allowWhileIdle: true // WAKES UP CPU / PHONE SCREEN IN STAND-BY DOZE MODE
+            allowWhileIdle: true
+            // *** NO repeats: true *** NO every: 'day' ***
+            // One-shot notification. After it fires and is handled,
+            // the action listener schedules the next day's notification.
           },
           channelId,
           sound: channelSound,
@@ -224,13 +399,14 @@ export async function scheduleNativeLocalNotifications() {
   }
 }
 
-/**
- * Checks all active medications against current time and triggers alarms/notifications if due.
- */
+// ============================================================================
+// WEB-ONLY: 10-second polling for in-app notifications (browser preview)
+// Returns immediately on native Android.
+// ============================================================================
 export async function checkScheduledDoses() {
   try {
     const isCapacitor = window.Capacitor && window.Capacitor.isNativePlatform();
-    if (isCapacitor) return; // NATIVE ANDROID USES EXCLUSIVELY SYSTEM NOTIFICATIONS! NO DUPES OR IN-APP MODALS!
+    if (isCapacitor) return; // Native Android uses OS-level notifications exclusively
 
     const now = new Date();
     const currentHH = String(now.getHours()).padStart(2, '0');
@@ -263,22 +439,16 @@ export async function checkScheduledDoses() {
         const key = `${med.id}_${todayStr}_${timeStr}`;
 
         if (timeStr === currentTimeStr) {
-          // Check if dose has already been logged (either taken or missed)
           const isLogged = todayLogs.some(l => l.medicationId === med.id && l.scheduledTime === timeStr);
-          
+
           if (isLogged || notifiedDosesSet.has(key)) {
             continue;
           }
 
           notifiedDosesSet.add(key);
 
-          // 1. Play Audio Alarm Tone (Repeated 3 times)
           playNotificationSound(med.soundChoice || 'bell', med.criticalAlert ? 100 : 80, 3);
-
-          // 2. Trigger Web/System Notification
           sendWebNotification(med, timeStr);
-
-          // 3. Display In-App Notification Alarm Modal
           displayInAppDoseModal(med, timeStr);
         }
       }
@@ -288,9 +458,10 @@ export async function checkScheduledDoses() {
   }
 }
 
-/**
- * Sends a system desktop/mobile Web Notification with detailed header (Treatment + Medication) and 3 Actions.
- */
+// ============================================================================
+// WEB-ONLY HELPERS (browser preview)
+// ============================================================================
+
 function sendWebNotification(med, timeStr) {
   if (!('Notification' in window)) return;
 
@@ -334,9 +505,6 @@ function todayStringClean(timeStr) {
   return `${getTodayString()}_${timeStr.replace(':', '')}`;
 }
 
-/**
- * Snoozes a notification for 10 minutes without modifying DB or stock.
- */
 export function snoozeDose(med, timeStr) {
   showToast(`Notificarea pentru ${med.name} (${timeStr}) a fost amânată cu 10 minute.`);
 
@@ -347,9 +515,6 @@ export function snoozeDose(med, timeStr) {
   }, 10 * 60 * 1000);
 }
 
-/**
- * Displays a detailed 3-button modal alert inside the application interface.
- */
 export function displayInAppDoseModal(med, timeStr) {
   const existing = document.getElementById('dose-alarm-modal');
   if (existing) {
@@ -400,19 +565,16 @@ export function displayInAppDoseModal(med, timeStr) {
 
       <!-- 3 Action Buttons -->
       <div class="pt-1 flex flex-col gap-2.5">
-        <!-- Button 1: Luat -->
         <button id="btn-modal-take-dose" class="w-full h-12 bg-primary text-on-primary font-bold rounded-2xl shadow-lg hover:bg-primary-container active:scale-95 transition-all flex items-center justify-center gap-2 text-sm">
           <span class="material-symbols-outlined text-xl">check_circle</span>
           <span>Luat</span>
         </button>
 
-        <!-- Button 2: Amână 10 minute -->
         <button id="btn-modal-snooze-dose" class="w-full h-11 bg-secondary-container text-on-secondary-container font-bold rounded-2xl border border-secondary/30 hover:bg-secondary-fixed active:scale-95 transition-all flex items-center justify-center gap-2 text-sm">
           <span class="material-symbols-outlined text-lg">schedule</span>
           <span>Amână 10 minute</span>
         </button>
 
-        <!-- Button 3: Ratat -->
         <button id="btn-modal-miss-dose" class="w-full h-11 bg-error-container/60 text-error font-bold rounded-2xl border border-error/30 hover:bg-error-container active:scale-95 transition-all flex items-center justify-center gap-2 text-sm">
           <span class="material-symbols-outlined text-lg">cancel</span>
           <span>Ratat</span>
@@ -428,8 +590,8 @@ export function displayInAppDoseModal(med, timeStr) {
   modal.querySelector('#btn-modal-take-dose').addEventListener('click', async () => {
     await recordDoseStatus(med.id, timeStr, getTodayString(), 'taken');
     modal.remove();
-    const isUnlim = med.isUnlimited || med.totalStock === 'unlimited';
-    const toastMsg = isUnlim
+    const isUnlim2 = med.isUnlimited || med.totalStock === 'unlimited';
+    const toastMsg = isUnlim2
       ? `Doza de ${med.name} a fost marcată ca Luată.`
       : `Doza de ${med.name} a fost marcată ca Luată. Stocul s-a actualizat.`;
     showToast(toastMsg);
