@@ -81,7 +81,22 @@ export async function scheduleNativeLocalNotifications() {
           if (actionId === 'action_take') {
             await recordDoseStatus(medId, timeStr, todayStr, 'taken');
           } else if (actionId === 'action_snooze') {
-            snoozeDose(med, timeStr);
+            // Schedule a single 10-minute snooze notification
+            const snoozeDate = new Date(Date.now() + 10 * 60 * 1000);
+            const soundKey = (med.soundChoice || 'bell').toLowerCase().replace(/[^a-z0-9]/g, '');
+            await LocalNotifications.schedule({
+              notifications: [{
+                title: `⏰ AMÂNAT: ${med.name}`,
+                body: `⏰ Ora ${timeStr} • Doză: ${med.dosageDisplay || '1 comprimat'}`,
+                id: Math.floor(Math.random() * 800000) + 100000,
+                schedule: { at: snoozeDate, allowWhileIdle: true },
+                channelId: `medstrack_channel_${soundKey}`,
+                smallIcon: 'ic_launcher',
+                iconColor: '#0052b4',
+                actionTypeId: 'MED_ALARM_ACTIONS',
+                extra: { medId: med.id, timeStr }
+              }]
+            }).catch(() => {});
           } else if (actionId === 'action_miss') {
             await recordDoseStatus(medId, timeStr, todayStr, 'missed');
           }
@@ -190,6 +205,9 @@ export async function scheduleNativeLocalNotifications() {
  */
 export async function checkScheduledDoses() {
   try {
+    const isCapacitor = window.Capacitor && window.Capacitor.isNativePlatform();
+    if (isCapacitor) return; // NATIVE ANDROID USES EXCLUSIVELY SYSTEM NOTIFICATIONS! NO DUPES OR IN-APP MODALS!
+
     const now = new Date();
     const currentHH = String(now.getHours()).padStart(2, '0');
     const currentMM = String(now.getMinutes()).padStart(2, '0');
