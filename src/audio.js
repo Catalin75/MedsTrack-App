@@ -30,14 +30,25 @@ function getSoundDurationMs(soundName) {
 // Synthesize notification tones using Web Audio API or play custom recorded voice memo
 export async function playNotificationSound(soundName = 'bell', volumePercent = 75, repeatCount = 3) {
   try {
-    if (soundName && soundName.startsWith('voice_')) {
+    if (soundName === 'voice' || soundName.startsWith('voice_')) {
       const voiceId = soundName.replace('voice_', '');
+      let blobToPlay = null;
+
       try {
-        const { getVoiceMemo } = await import('./db.js');
-        const memo = await getVoiceMemo(voiceId);
-        if (memo && memo.blob) {
+        const { getVoiceMemo, getVoiceMemos } = await import('./db.js');
+        if (voiceId && voiceId !== 'voice') {
+          const memo = await getVoiceMemo(voiceId);
+          if (memo && memo.blob) blobToPlay = memo.blob;
+        }
+        if (!blobToPlay) {
+          const allMemos = await getVoiceMemos();
+          if (allMemos && allMemos.length > 0) {
+            blobToPlay = allMemos[allMemos.length - 1].blob;
+          }
+        }
+        if (blobToPlay) {
           for (let r = 0; r < repeatCount; r++) {
-            await playAudioBlob(memo.blob);
+            await playAudioBlob(blobToPlay);
             if (r < repeatCount - 1) {
               await new Promise(resolve => setTimeout(resolve, 500));
             }
@@ -194,7 +205,7 @@ export function stopRecording() {
     }
 
     mediaRecorder.onstop = () => {
-      const durationSeconds = Math.round((Date.now() - recordingStartTime) / 1000);
+      const durationSeconds = Math.max(1, Math.round((Date.now() - recordingStartTime) / 1000));
       const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
       
       // Stop stream tracks
@@ -222,6 +233,6 @@ export function playAudioBlob(blob) {
       URL.revokeObjectURL(url);
       reject(e);
     };
-    audio.play();
+    audio.play().catch(reject);
   });
 }
