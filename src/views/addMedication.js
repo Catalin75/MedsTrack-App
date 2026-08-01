@@ -1,4 +1,4 @@
-import { saveMedication, getMedication, getTodayString } from '../db.js';
+import { saveMedication, getMedication, getTodayString, saveVoiceMemo, getVoiceMemo } from '../db.js';
 import { playNotificationSound, startRecording, stopRecording, playAudioBlob } from '../audio.js';
 
 let currentStep = 1;
@@ -18,7 +18,8 @@ let formData = {
   totalStock: 20,
   remainingStock: 20,
   voiceBlob: null,
-  voiceDuration: 0
+  voiceDuration: 0,
+  voiceMemoId: null
 };
 
 export async function renderAddMedication(container, navigateTo, editId = null) {
@@ -45,6 +46,12 @@ export async function renderAddMedication(container, navigateTo, editId = null) 
             }
           ];
 
+      let loadedBlob = null;
+      if (existing.voiceMemoId) {
+        const memo = await getVoiceMemo(existing.voiceMemoId);
+        if (memo && memo.blob) loadedBlob = memo.blob;
+      }
+
       formData = {
         id: existing.id,
         treatmentCategory: existing.treatmentCategory || '',
@@ -60,8 +67,9 @@ export async function renderAddMedication(container, navigateTo, editId = null) 
         totalStock: isUnlim ? 'unlimited' : (existing.totalStock || 20),
         remainingStock: isUnlim ? 'unlimited' : (existing.remainingStock !== undefined ? existing.remainingStock : existing.totalStock || 20),
         startDate: existing.startDate || getTodayString(),
-        voiceBlob: null,
-        voiceDuration: 0
+        voiceBlob: loadedBlob,
+        voiceDuration: existing.voiceDuration || 0,
+        voiceMemoId: existing.voiceMemoId || null
       };
     }
   } else {
@@ -92,7 +100,8 @@ export async function renderAddMedication(container, navigateTo, editId = null) 
       remainingStock: 20,
       startDate: getTodayString(),
       voiceBlob: null,
-      voiceDuration: 0
+      voiceDuration: 0,
+      voiceMemoId: null
     };
   }
 
@@ -325,38 +334,27 @@ function renderStep3() {
     { id: 'echo', name: 'Digital Echo', desc: 'Sunet sintetic modern' }
   ];
 
+  if (formData.voiceBlob || formData.voiceMemoId) {
+    sounds.unshift({
+      id: 'voice',
+      name: '🎤 Memento Vocal Înregistrat',
+      desc: 'Vocea ta înregistrată redată automat la alertă'
+    });
+  }
+
+  const isVoiceSelected = formData.soundChoice === 'voice' || (typeof formData.soundChoice === 'string' && formData.soundChoice.startsWith('voice_'));
+
   return `
     <div class="space-y-5">
-      <!-- Sound Selection -->
-      <div class="space-y-2">
-        <label class="text-xs font-bold text-outline uppercase tracking-wider px-1">Sunet Notificare</label>
-        <div class="space-y-2">
-          ${sounds.map(s => `
-            <label class="flex items-center justify-between bg-surface-container-lowest p-3.5 rounded-2xl border-2 ${formData.soundChoice === s.id ? 'border-primary bg-primary-fixed/10' : 'border-outline-variant/30'} cursor-pointer transition-all">
-              <div class="flex items-center gap-3">
-                <button type="button" data-sound="${s.id}" class="btn-preview-sound w-9 h-9 flex items-center justify-center bg-primary-fixed rounded-full text-primary hover:scale-105 active:scale-95 transition-all">
-                  <span class="material-symbols-outlined text-xl">play_arrow</span>
-                </button>
-                <div>
-                  <p class="text-sm font-bold text-on-surface">${s.name}</p>
-                  <p class="text-xs text-on-surface-variant">${s.desc}</p>
-                </div>
-              </div>
-              <input type="radio" name="sound_choice" value="${s.id}" ${formData.soundChoice === s.id ? 'checked' : ''} class="w-5 h-5 text-primary" />
-            </label>
-          `).join('')}
-        </div>
-      </div>
-
-      <!-- Voice Memo Card -->
-      <div class="bg-surface-container-lowest p-4 rounded-2xl border border-outline-variant/40 shadow-sm space-y-3">
+      <!-- Voice Memo Card First -->
+      <div class="bg-surface-container-lowest p-4 rounded-3xl border-2 ${formData.voiceBlob ? 'border-tertiary bg-tertiary-fixed/10' : 'border-outline-variant/40'} shadow-sm space-y-3">
         <div class="flex items-center gap-3">
           <div class="w-10 h-10 bg-tertiary-fixed rounded-full flex items-center justify-center text-tertiary">
             <span class="material-symbols-outlined">mic</span>
           </div>
           <div>
             <h3 class="text-sm font-bold text-on-surface">Înregistrează Memento Vocal</h3>
-            <p class="text-xs text-on-surface-variant">Înregistrează propriul tău mesaj audio</p>
+            <p class="text-xs text-on-surface-variant">Poți folosi propria voce ca sunet de notificare!</p>
           </div>
         </div>
 
@@ -369,9 +367,33 @@ function renderStep3() {
           ${formData.voiceBlob ? `
             <button type="button" id="btn-play-voice" class="px-3 py-2 bg-surface-container-high text-primary text-xs font-bold rounded-xl flex items-center gap-1.5 hover:bg-surface-container transition-all">
               <span class="material-symbols-outlined text-sm">play_arrow</span>
-              <span>Ascultă (${formData.voiceDuration}s)</span>
+              <span>Ascultă (${formData.voiceDuration || 1}s)</span>
             </button>
           ` : ''}
+        </div>
+      </div>
+
+      <!-- Sound Selection -->
+      <div class="space-y-2">
+        <label class="text-xs font-bold text-outline uppercase tracking-wider px-1">Sunet Notificare</label>
+        <div class="space-y-2">
+          ${sounds.map(s => {
+            const isSelected = (s.id === 'voice' && isVoiceSelected) || (formData.soundChoice === s.id);
+            return `
+              <label class="flex items-center justify-between bg-surface-container-lowest p-3.5 rounded-2xl border-2 ${isSelected ? 'border-primary bg-primary-fixed/10' : 'border-outline-variant/30'} cursor-pointer transition-all">
+                <div class="flex items-center gap-3">
+                  <button type="button" data-sound="${s.id}" class="btn-preview-sound w-9 h-9 flex items-center justify-center bg-primary-fixed rounded-full text-primary hover:scale-105 active:scale-95 transition-all">
+                    <span class="material-symbols-outlined text-xl">play_arrow</span>
+                  </button>
+                  <div>
+                    <p class="text-sm font-bold text-on-surface">${s.name}</p>
+                    <p class="text-xs text-on-surface-variant">${s.desc}</p>
+                  </div>
+                </div>
+                <input type="radio" name="sound_choice" value="${s.id}" ${isSelected ? 'checked' : ''} class="w-5 h-5 text-primary" />
+              </label>
+            `;
+          }).join('')}
         </div>
       </div>
 
@@ -428,7 +450,6 @@ function attachStepEvents(container, navigateTo) {
         }
 
         // Validate medication names
-        let valid = true;
         formData.medications.forEach((m, i) => {
           if (!m.name || !m.name.trim()) {
             m.name = `Medicament ${i + 1}`;
@@ -478,6 +499,17 @@ function attachStepEvents(container, navigateTo) {
           return `${m.name} (${m.dosageValue || 1} ${unitLabel})`;
         }).join(' + ');
 
+        // Save Voice Memo to DB if present
+        let savedMemoId = formData.voiceMemoId;
+        if (formData.voiceBlob) {
+          savedMemoId = await saveVoiceMemo(formData.voiceBlob, formData.voiceDuration);
+        }
+
+        let finalSoundChoice = formData.soundChoice;
+        if (formData.soundChoice === 'voice' || (formData.soundChoice && formData.soundChoice.startsWith('voice_'))) {
+          finalSoundChoice = savedMemoId ? `voice_${savedMemoId}` : 'voice';
+        }
+
         const medToSave = {
           name: formData.name || formData.treatmentCategory || 'Tratament',
           treatmentCategory: formData.treatmentCategory || 'General',
@@ -491,7 +523,9 @@ function attachStepEvents(container, navigateTo) {
           dosesPerDay: formData.dosesPerDay,
           times: formData.times,
           criticalAlert: formData.criticalAlert,
-          soundChoice: formData.soundChoice,
+          soundChoice: finalSoundChoice,
+          voiceMemoId: savedMemoId,
+          voiceDuration: formData.voiceDuration,
           isUnlimited: isUnlim,
           totalStock: isUnlim ? 'unlimited' : (formData.medications[0].totalStock || 20),
           remainingStock: isUnlim ? 'unlimited' : (formData.medications[0].remainingStock !== undefined ? formData.medications[0].remainingStock : 20),
@@ -506,7 +540,7 @@ function attachStepEvents(container, navigateTo) {
         }
 
         await saveMedication(medToSave);
-        playNotificationSound('bell', 70);
+        playNotificationSound(finalSoundChoice, 70, 1);
         navigateTo('cabinet');
       }
     });
@@ -664,7 +698,11 @@ function attachStepEvents(container, navigateTo) {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
         const sId = btn.getAttribute('data-sound');
-        playNotificationSound(sId, 75);
+        if (sId === 'voice') {
+          if (formData.voiceBlob) playAudioBlob(formData.voiceBlob);
+        } else {
+          playNotificationSound(sId, 75);
+        }
       });
     });
 
@@ -678,6 +716,44 @@ function attachStepEvents(container, navigateTo) {
     if (chkCrit) {
       chkCrit.addEventListener('change', (e) => {
         formData.criticalAlert = e.target.checked;
+      });
+    }
+
+    let isRecording = false;
+    const btnRecord = container.querySelector('#btn-record-voice');
+    const recStatus = container.querySelector('#rec-status-text');
+    const recIcon = container.querySelector('#rec-icon');
+
+    if (btnRecord) {
+      btnRecord.addEventListener('click', async () => {
+        if (!isRecording) {
+          try {
+            await startRecording();
+            isRecording = true;
+            if (recStatus) recStatus.textContent = 'Oprește Înregistrarea...';
+            if (recIcon) recIcon.textContent = 'stop';
+            btnRecord.classList.add('animate-pulse', 'bg-error', 'text-white');
+          } catch (err) {
+            alert('Nu s-a putut accesa microfonul: ' + err.message);
+          }
+        } else {
+          const recResult = await stopRecording();
+          isRecording = false;
+          btnRecord.classList.remove('animate-pulse', 'bg-error', 'text-white');
+          if (recResult && recResult.blob) {
+            formData.voiceBlob = recResult.blob;
+            formData.voiceDuration = recResult.durationSeconds;
+            formData.soundChoice = 'voice';
+            renderWizardStep(container, navigateTo);
+          }
+        }
+      });
+    }
+
+    const btnPlayVoice = container.querySelector('#btn-play-voice');
+    if (btnPlayVoice && formData.voiceBlob) {
+      btnPlayVoice.addEventListener('click', () => {
+        playAudioBlob(formData.voiceBlob);
       });
     }
   }
