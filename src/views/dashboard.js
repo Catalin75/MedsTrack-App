@@ -320,7 +320,7 @@ function renderPeriodSection(periodTitle, iconName, colorClass, scheduleItems, d
       </div>
       <div class="space-y-3">
         ${items.map(item => `
-          <div class="bg-surface-container-lowest p-4 rounded-2xl border ${item.isTaken ? 'border-primary/40 bg-surface-container-lowest/70' : 'border-outline-variant/40'} shadow-sm flex items-center justify-between group hover:shadow-md transition-all">
+          <div class="bg-surface-container-lowest p-4 rounded-2xl border ${item.isTaken ? 'border-green-500/50 bg-green-50/30' : 'border-outline-variant/40'} shadow-sm flex items-center justify-between group hover:shadow-md transition-all">
             <div class="flex items-center gap-3.5 flex-1 pr-2">
               <div class="w-12 h-12 rounded-xl ${item.med.colorBg || 'bg-primary-fixed'} flex items-center justify-center ${item.med.colorText || 'text-primary'} shrink-0">
                 <span class="material-symbols-outlined text-[26px]">${item.med.icon || 'pill'}</span>
@@ -351,7 +351,7 @@ function renderPeriodSection(periodTitle, iconName, colorClass, scheduleItems, d
             </div>
             <button data-med-id="${item.med.id}" data-time="${item.timeStr}" class="toggle-dose-btn w-11 h-11 rounded-full ${
               item.isTaken
-                ? 'bg-primary text-on-primary shadow-md scale-105'
+                ? 'bg-green-600 text-white shadow-md shadow-green-600/30 scale-105'
                 : 'border-2 border-outline-variant flex items-center justify-center text-outline hover:border-primary hover:text-primary'
             } flex items-center justify-center transition-all active:scale-90 shrink-0">
               <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' ${item.isTaken ? 1 : 0};">${item.isTaken ? 'check_circle' : 'check'}</span>
