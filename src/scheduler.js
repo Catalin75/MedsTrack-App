@@ -1,5 +1,5 @@
 // Real-time Dose Scheduler & Background Notification Service for MedsTrack
-import { getMedications, getLogsForDate, getTodayString, recordDoseStatus } from './db.js';
+import { getMedications, getLogsForDate, getTodayString, recordDoseStatus, getMedication } from './db.js';
 import { playNotificationSound } from './audio.js';
 import { LocalNotifications } from '@capacitor/local-notifications';
 
@@ -47,17 +47,47 @@ export async function scheduleNativeLocalNotifications() {
     const perm = await LocalNotifications.requestPermissions();
     if (perm.display !== 'granted') return;
 
-    // 2. Create MAX Importance Channel for Floating Heads-up Banner over Screen & Stand-by Wakeup
-    await LocalNotifications.createChannel({
-      id: 'medstrack_alarms_v2',
-      name: 'Alerte Medicamente MedsTrack',
-      description: 'Notificări prioritare plutitoare pe ecran pentru administrarea medicamentelor',
-      importance: 5, // IMPORTANCE_MAX (High Priority Floating Banner)
-      visibility: 1, // VISIBILITY_PUBLIC on Lock Screen
-      vibration: true,
-      lights: true,
-      lightColor: '#0052b4'
-    }).catch(err => console.log('Channel creation note:', err));
+    // 2. Register Interactive Action Types (🟢 Luat, 🟡 Amână 10 min, 🔴 Ratat)
+    await LocalNotifications.registerActionTypes({
+      types: [
+        {
+          id: 'MED_ALARM_ACTIONS',
+          actions: [
+            { id: 'action_take', title: '🟢 Luat', foreground: true },
+            { id: 'action_snooze', title: '🟡 Amână 10 min', foreground: false },
+            { id: 'action_miss', title: '🔴 Ratat', foreground: false }
+          ]
+        }
+      ]
+    }).catch(err => console.log('ActionTypes reg note:', err));
+
+    // 3. Attach Action Listener for Notification Buttons
+    LocalNotifications.addListener('localNotificationActionPerformed', async (notificationAction) => {
+      try {
+        const actionId = notificationAction.actionId;
+        const extra = notificationAction.notification.extra || {};
+        const { medId, timeStr } = extra;
+
+        if (!medId || !timeStr) return;
+        const med = await getMedication(medId);
+        if (!med) return;
+
+        if (actionId === 'action_take') {
+          await recordDoseStatus(medId, timeStr, getTodayString(), 'taken');
+          const isUnlim = med.isUnlimited || med.totalStock === 'unlimited';
+          showToast(isUnlim ? `Doza de ${med.name} a fost marcată ca Luată.` : `Doza de ${med.name} a fost marcată ca Luată. Stocul s-a actualizat.`);
+          if (window.refreshCurrentView) window.refreshCurrentView();
+        } else if (actionId === 'action_snooze') {
+          snoozeDose(med, timeStr);
+        } else if (actionId === 'action_miss') {
+          await recordDoseStatus(medId, timeStr, getTodayString(), 'missed');
+          showToast(`Doza de ${med.name} a fost marcată ca Ratată.`);
+          if (window.refreshCurrentView) window.refreshCurrentView();
+        }
+      } catch (err) {
+        console.log('Action listener note:', err);
+      }
+    });
 
     const medications = await getMedications();
     const notificationsToSchedule = [];
@@ -71,9 +101,28 @@ export async function scheduleNativeLocalNotifications() {
 
     for (const med of medications) {
       if (!med.times || !Array.isArray(med.times)) continue;
-      
-      const categoryPart = med.treatmentCategory ? `[${med.treatmentCategory}] ` : '';
-      const title = `💊 ${categoryPart}${med.name}`;
+
+      // Deduplicate Title (Avoid [Tttt] Tttt when category === name)
+      let title = `💊 ${med.name}`;
+      if (med.treatmentCategory && med.treatmentCategory.trim() !== '' && med.treatmentCategory.toLowerCase() !== med.name.toLowerCase() && med.treatmentCategory.toLowerCase() !== 'general') {
+        title = `💊 [${med.treatmentCategory}] ${med.name}`;
+      }
+
+      // Selected Sound Channel
+      const soundKey = (med.soundChoice || 'bell').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const channelId = `medstrack_channel_${soundKey}`;
+
+      await LocalNotifications.createChannel({
+        id: channelId,
+        name: `Alerte ${soundKey}`,
+        description: 'Notificări prioritare plutitoare pe ecran pentru administrarea medicamentelor',
+        importance: 5, // IMPORTANCE_MAX (High Priority Floating Banner)
+        visibility: 1, // VISIBILITY_PUBLIC on Lock Screen
+        sound: `${soundKey}.wav`,
+        vibration: true,
+        lights: true,
+        lightColor: '#0052b4'
+      }).catch(() => {});
 
       for (let tIdx = 0; tIdx < med.times.length; tIdx++) {
         const timeStr = med.times[tIdx];
@@ -90,7 +139,7 @@ export async function scheduleNativeLocalNotifications() {
         const isUnlim = med.isUnlimited || med.totalStock === 'unlimited';
         const bodyText = isUnlim
           ? `⏰ Ora ${timeStr} • Doză: ${med.dosageDisplay || '1 comprimat'}`
-          : `⏰ Ora ${timeStr} • Doză: ${med.dosageDisplay || '1 comprimat'}\n📋 Stoc: ${med.remainingStock !== undefined ? med.remainingStock : (med.totalStock || 20)} doze`;
+          : `⏰ Ora ${timeStr} • Doză: ${med.dosageDisplay || '1 comprimat'} (${med.remainingStock !== undefined ? med.remainingStock : (med.totalStock || 20)} doze)`;
 
         const uniqueId = Number(`${med.id || 1}${tIdx + 1}${notificationIdCounter++}`);
 
@@ -104,10 +153,11 @@ export async function scheduleNativeLocalNotifications() {
             every: 'day',
             allowWhileIdle: true // WAKES UP CPU / PHONE SCREEN IN STAND-BY DOZE MODE
           },
-          channelId: 'medstrack_alarms_v2',
+          channelId,
+          sound: `${soundKey}.wav`,
           smallIcon: 'ic_launcher',
           iconColor: '#0052b4',
-          actionTypeId: 'MED_ALARM',
+          actionTypeId: 'MED_ALARM_ACTIONS',
           extra: { medId: med.id, timeStr }
         });
       }
