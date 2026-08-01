@@ -341,9 +341,11 @@ function renderPeriodSection(periodTitle, iconName, colorClass, scheduleItems, d
                 <div class="flex items-center gap-2 mt-1 flex-wrap">
                   <span class="text-xs bg-surface-container-high px-2 py-0.5 rounded-md text-on-surface-variant font-medium">${item.med.dosageDisplay || '1 comprimat'}</span>
                   <span class="text-xs text-primary font-bold">${item.timeStr}</span>
-                  <span class="text-[11px] ${item.med.isUnlimited ? 'text-outline' : (typeof item.med.remainingStock === 'number' && item.med.remainingStock <= 5 ? 'text-error font-bold' : 'text-on-surface-variant')}">
-                    • Stoc: ${item.med.isUnlimited ? '∞' : (item.med.remainingStock !== undefined ? item.med.remainingStock : (item.med.totalStock || 20))} doze
-                  </span>
+                  ${!item.med.isUnlimited && item.med.totalStock !== 'unlimited' ? `
+                    <span class="text-[11px] ${typeof item.med.remainingStock === 'number' && item.med.remainingStock <= 5 ? 'text-error font-bold' : 'text-on-surface-variant'}">
+                      • Stoc: ${item.med.remainingStock !== undefined ? item.med.remainingStock : (item.med.totalStock || 20)} doze
+                    </span>
+                  ` : ''}
                 </div>
               </div>
             </div>
