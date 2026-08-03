@@ -127,7 +127,12 @@ export async function saveMedication(med) {
     const tx = db.transaction('medications', 'readwrite');
     const store = tx.objectStore('medications');
     const request = store.put(med);
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('medications-updated'));
+      }
+      resolve(request.result);
+    };
     request.onerror = (e) => reject(e.target.error);
   });
 }
@@ -138,7 +143,12 @@ export async function deleteMedication(id) {
     const tx = db.transaction('medications', 'readwrite');
     const store = tx.objectStore('medications');
     const request = store.delete(Number(id));
-    request.onsuccess = () => resolve();
+    request.onsuccess = () => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('medications-updated'));
+      }
+      resolve();
+    };
     request.onerror = (e) => reject(e.target.error);
   });
 }
@@ -294,29 +304,5 @@ export async function saveSettings(settings) {
     const store = tx.objectStore('settings');
     store.put({ key: 'app', ...settings });
     tx.oncomplete = () => resolve();
-  });
-}
-
-export async function getPendingSnoozes() {
-  const db = await openDB();
-  return new Promise((resolve) => {
-    const tx = db.transaction('settings', 'readonly');
-    const store = tx.objectStore('settings');
-    const request = store.get('pending_snoozes');
-    request.onsuccess = () => {
-      resolve(request.result ? (request.result.snoozes || []) : []);
-    };
-    request.onerror = () => resolve([]);
-  });
-}
-
-export async function savePendingSnoozes(snoozes) {
-  const db = await openDB();
-  return new Promise((resolve) => {
-    const tx = db.transaction('settings', 'readwrite');
-    const store = tx.objectStore('settings');
-    store.put({ key: 'pending_snoozes', snoozes: snoozes || [] });
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => resolve();
   });
 }
