@@ -33,7 +33,8 @@ jobs:
 
       - name: Add Android Platform & Sync
         run: |
-          npx cap sync android
+          npx cap add android || true
+          npx cap sync android || npx cap copy android
 
       - name: Make Gradle Executable
         run: chmod +x android/gradlew
