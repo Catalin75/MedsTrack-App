@@ -18,7 +18,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
 
       - name: Setup Java JDK
         uses: actions/setup-java@v4
@@ -27,14 +26,13 @@ jobs:
           java-version: '17'
 
       - name: Install Dependencies
-        run: npm ci
+        run: npm install
 
       - name: Build Web App
         run: npm run build
 
       - name: Add Android Platform & Sync
         run: |
-          npx cap add android || true
           npx cap sync android
 
       - name: Make Gradle Executable
