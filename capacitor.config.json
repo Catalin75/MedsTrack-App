@@ -1,13 +1,5 @@
 {
   "appId": "com.medstrack.app",
   "appName": "MedsTrack",
-  "webDir": "dist",
-  "bundledWebRuntime": false,
-  "plugins": {
-    "LocalNotifications": {
-      "smallIcon": "ic_stat_icon_config_sample",
-      "iconColor": "#0058bc",
-      "sound": "bell.wav"
-    }
-  }
+  "webDir": "dist"
 }
