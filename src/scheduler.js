@@ -19,22 +19,44 @@ let scheduleDebounceTimer = null;
 // ============================================================================
 // STABLE NOTIFICATION ID GENERATOR
 // ============================================================================
-// Produces a deterministic integer from medId + timeStr so the SAME dose
-// always maps to the SAME notification ID. This ensures cancellation works
-// correctly and prevents duplicate/phantom notifications.
+// Produces a deterministic integer from medId + timeStr + dateStr so every
+// (medication, dose-time, treatment-day) maps to a UNIQUE, stable ID. Because
+// each alarm is a one-shot with its own ID, we can schedule the whole course
+// of the treatment without any of them replacing/duplicating another.
 // ============================================================================
-function getStableNotificationId(medId, timeStr) {
-  const numericMedId = Number(medId) || 1;
-  const timeParts = timeStr.split(':');
-  const timeNum = Number(timeParts[0]) * 60 + Number(timeParts[1]); // 0..1439
-  // Ensure positive 32-bit integer within Android's int range
-  return ((numericMedId * 10000 + timeNum) % 2000000000) + 1;
+function getStableNotificationId(medId, timeStr, dateStr = '') {
+  const numericMedId = (Number(medId) || 1) & 0xffff;
+  const timeParts = String(timeStr).split(':');
+  const timeNum = (Number(timeParts[0]) || 0) * 60 + (Number(timeParts[1]) || 0); // 0..1439
+  const dayNum = Number(String(dateStr).replace(/\D/g, '')) || 0; // e.g. 20260806
+  // Deterministic hash, folded into Android's positive int range.
+  let hash = (Math.imul(numericMedId, 1000003) + Math.imul(timeNum, 1009) + dayNum) | 0;
+  hash = Math.imul(hash, 31) ^ (hash >>> 4);
+  if (hash < 0) hash = -hash;
+  return (hash > 0 ? hash : 1) % 1999999999 + 1;
 }
 
 // Snooze IDs are offset to avoid collisions with regular dose IDs
-function getSnoozeNotificationId(medId, timeStr) {
-  return getStableNotificationId(medId, timeStr) + 5000000;
+function getSnoozeNotificationId(medId, timeStr, dateStr = '') {
+  return ((getStableNotificationId(medId, timeStr, dateStr) + 4000000) % 1999999999) + 1;
 }
+
+// ============================================================================
+// DATE HELPERS (YYYY-MM-DD, timezone-safe)
+// ============================================================================
+function isoToUtcMs(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return Date.UTC(y, m - 1, d);
+}
+function addDaysISO(iso, n) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + n));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
+function diffDaysISO(a, b) {
+  return Math.round((isoToUtcMs(b) - isoToUtcMs(a)) / 86400000);
+}
+const ONE_SHOT_MAX_DAYS = 400; // keep the alarm count sane on Android
 
 // ============================================================================
 // INIT — Called once on app startup
@@ -186,7 +208,7 @@ async function scheduleSnoozeNotification(med, timeStr) {
       },
       channelId: isVoice ? 'medstrack_channel_bell' : `medstrack_channel_${soundKey}`,
       sound: isVoice ? 'bell.wav' : `${soundKey}.wav`,
-      smallIcon: 'ic_launcher',
+      smallIcon: 'ic_notification',
       iconColor: '#0052b4',
       actionTypeId: 'MED_ALARM_ACTIONS',
       extra: { medId: med.id, timeStr, soundChoice }
@@ -232,7 +254,6 @@ export async function scheduleNativeLocalNotifications() {
 
     const medications = await getMedications();
     const todayStr = getTodayString();
-    const todayLogs = await getLogsForDate(todayStr);
 
     // 1. Cancel ALL pending notifications for a clean slate
     const pending = await LocalNotifications.getPending().catch(() => ({ notifications: [] }));
@@ -241,17 +262,36 @@ export async function scheduleNativeLocalNotifications() {
     }
 
     const notificationsToSchedule = [];
+    // Android holds a limited number of pending alarms per app (frequently ~500
+    // on several OEMs). We budget the one-shot alarms across ALL meds so a big
+    // multi-medication setup can never overflow the alarm queue; once the
+    // budget is spent, the remaining (med, time) entries fall back to a single
+    // daily repeating alarm, which still fires every day until the course ends.
+    let oneShotBudget = 450;
 
     for (const med of medications) {
       if (!med.times || !Array.isArray(med.times)) continue;
 
-      // Check if treatment duration is still active
-      if (med.startDate && med.durationDays) {
-        const start = new Date(med.startDate);
-        const todayDate = new Date(todayStr);
-        const diffTime = todayDate.getTime() - start.getTime();
-        const diffDays = Math.floor(diffTime / (1000 * 3600 * 24));
-        if (diffDays < 0 || diffDays >= med.durationDays) continue;
+      // =========================================================================
+      // Compute the treatment window [dayStartISO .. dayEndISO] (inclusive).
+      //   - startDate + durationDays bound the course (e.g. 2026-08-06 + 7 days).
+      //   - If the course already ended, skip (NO infinite notifications).
+      //   - If the course is still in the future, start at its start date.
+      // =========================================================================
+      let dayStartISO = null;
+      let dayEndISO = null;
+      let hasWindow = false;
+
+      if (med.startDate && Number(med.durationDays) > 0) {
+        const startISO = med.startDate;
+        dayEndISO = addDaysISO(startISO, Number(med.durationDays) - 1);
+        hasWindow = true;
+
+        // Already finished before today? Do not notify.
+        if (dayEndISO < todayStr) continue;
+
+        // Notify from today (if the course already began) or from the course start.
+        dayStartISO = todayStr > startISO ? todayStr : startISO;
       }
 
       // Build notification title
@@ -284,44 +324,95 @@ export async function scheduleNativeLocalNotifications() {
         }).catch(() => {});
       }
 
+      const isUnlim = med.isUnlimited || med.totalStock === 'unlimited';
+      const dosageTxt = med.dosageDisplay || '1 comprimat';
+
       for (let tIdx = 0; tIdx < med.times.length; tIdx++) {
         const timeStr = med.times[tIdx];
         if (!timeStr) continue;
 
-        const notifId = getStableNotificationId(med.id, timeStr);
-        const [hours, minutes] = timeStr.split(':').map(Number);
-
-        // Compute the NEXT fire date
-        const scheduleDate = new Date();
-        scheduleDate.setHours(hours, minutes, 0, 0);
-
-        // If time has already passed today, start from TOMORROW
-        if (scheduleDate.getTime() <= Date.now()) {
-          scheduleDate.setDate(scheduleDate.getDate() + 1);
-        }
-
-        const isUnlim = med.isUnlimited || med.totalStock === 'unlimited';
         const bodyText = isUnlim
-          ? `⏰ Ora ${timeStr} • Doză: ${med.dosageDisplay || '1 comprimat'}`
-          : `⏰ Ora ${timeStr} • Doză: ${med.dosageDisplay || '1 comprimat'} (${med.remainingStock !== undefined ? med.remainingStock : (med.totalStock || 20)} doze)`;
+          ? `⏰ Ora ${timeStr} • Doză: ${dosageTxt}`
+          : `⏰ Ora ${timeStr} • Doză: ${dosageTxt} (${med.remainingStock !== undefined ? med.remainingStock : (med.totalStock || 20)} doze)`;
 
-        notificationsToSchedule.push({
-          title,
-          body: bodyText,
-          id: notifId,
-          schedule: {
-            at: scheduleDate,
-            repeats: true,
-            every: 'day',
-            allowWhileIdle: true
-          },
-          channelId,
-          sound: channelSound,
-          smallIcon: 'ic_launcher',
-          iconColor: '#0052b4',
-          actionTypeId: 'MED_ALARM_ACTIONS',
-          extra: { medId: med.id, timeStr, soundChoice }
-        });
+        if (hasWindow) {
+          // =====================================================================
+          // BOUNDED TREATMENT — schedule an EXACT one-shot alarm for EVERY day.
+          // One notification per (day, time) with a unique stable ID, so the
+          // whole course fires at the exact hours the user defined, and it keeps
+          // working while the app is closed (the OS owns the alarms).
+          //
+          // We also respect a global one-shot budget so a large multi-med setup
+          // can never overflow Android's per-app pending-alarm limit; once the
+          // budget would be exceeded we fall back to a single daily repeating
+          // alarm for that (med, time), which still covers every remaining day.
+          // =====================================================================
+          const numDays = diffDaysISO(dayStartISO, dayEndISO) + 1;
+          const useOneShot = numDays <= ONE_SHOT_MAX_DAYS && numDays <= oneShotBudget;
+
+          if (useOneShot) {
+            oneShotBudget -= numDays;
+            for (let i = 0; i < numDays; i++) {
+              const dayISO = addDaysISO(dayStartISO, i);
+              const fireDate = new Date(`${dayISO}T${timeStr}:00`);
+              // Skip a time that already passed today (e.g. when starting mid-day).
+              if (fireDate.getTime() <= Date.now()) continue;
+              notificationsToSchedule.push({
+                title,
+                body: bodyText,
+                id: getStableNotificationId(med.id, timeStr, dayISO),
+                schedule: { at: fireDate, allowWhileIdle: true }, // exact one-shot
+                channelId,
+                sound: channelSound,
+                smallIcon: 'ic_notification',
+                iconColor: '#0052b4',
+                actionTypeId: 'MED_ALARM_ACTIONS',
+                extra: { medId: med.id, timeStr, day: dayISO, soundChoice }
+              });
+            }
+          } else {
+            // Very long course or budget exhausted: fall back to a single daily
+            // repeating alarm that still fires every day until the course ends.
+            const [hours, minutes] = timeStr.split(':').map(Number);
+            const scheduleDate = new Date();
+            scheduleDate.setHours(hours, minutes, 0, 0);
+            if (scheduleDate.getTime() <= Date.now()) {
+              scheduleDate.setDate(scheduleDate.getDate() + 1);
+            }
+            notificationsToSchedule.push({
+              title,
+              body: bodyText,
+              id: getStableNotificationId(med.id, timeStr),
+              schedule: { at: scheduleDate, repeats: true, every: 'day', allowWhileIdle: true },
+              channelId,
+              sound: channelSound,
+              smallIcon: 'ic_notification',
+              iconColor: '#0052b4',
+              actionTypeId: 'MED_ALARM_ACTIONS',
+              extra: { medId: med.id, timeStr, soundChoice }
+            });
+          }
+        } else {
+          // No duration window: a never-ending daily repeating reminder.
+          const [hours, minutes] = timeStr.split(':').map(Number);
+          const scheduleDate = new Date();
+          scheduleDate.setHours(hours, minutes, 0, 0);
+          if (scheduleDate.getTime() <= Date.now()) {
+            scheduleDate.setDate(scheduleDate.getDate() + 1);
+          }
+          notificationsToSchedule.push({
+            title,
+            body: bodyText,
+            id: getStableNotificationId(med.id, timeStr),
+            schedule: { at: scheduleDate, repeats: true, every: 'day', allowWhileIdle: true },
+            channelId,
+            sound: channelSound,
+            smallIcon: 'ic_notification',
+            iconColor: '#0052b4',
+            actionTypeId: 'MED_ALARM_ACTIONS',
+            extra: { medId: med.id, timeStr, soundChoice }
+          });
+        }
       }
     }
 
